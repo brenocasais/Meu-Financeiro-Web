@@ -1,6 +1,7 @@
 import React from 'react';
-import { Settings, Database, Moon, Sun, ShieldCheck, Smartphone, CheckCircle2 } from 'lucide-react';
+import { Settings, Database, Moon, Sun, Smartphone, LogOut, User as UserIcon } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import { firebaseConfig } from '../firebase/config';
 import { PWAInstallPrompt } from '../components/pwa/PWAInstallPrompt';
 
@@ -10,6 +11,15 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onClose }) => {
   const { theme, setTheme } = useTheme();
+  const { user, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+    } catch (error) {
+      console.error('Erro ao sair:', error);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -25,10 +35,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onClose }) => {
             </div>
             <div>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] dark:text-[#A9B1B1]">
-                Fase 8 • Planejada
+                Ajustes e Conta
               </span>
               <h2 className="text-base font-bold text-[#111827] dark:text-[#F5F7F7]">
-                Tela Ajustes
+                Configurações
               </h2>
             </div>
           </div>
@@ -40,6 +50,45 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onClose }) => {
               Voltar
             </button>
           )}
+        </div>
+      </div>
+
+      {/* User Account Section */}
+      <div
+        id="card-account-settings"
+        className="rounded-[20px] bg-[#FFFFFF] dark:bg-[#172021] p-5 shadow-xs border border-[#E5E7EB] dark:border-[#222E30] space-y-3"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-[#FAFAFB] dark:bg-[#0D1214] border border-[#E5E7EB] dark:border-[#222E30] flex items-center justify-center text-[#22A45D] dark:text-[#39D47A]">
+              {user?.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || 'Avatar'}
+                  className="w-full h-full rounded-full object-cover"
+                />
+              ) : (
+                <UserIcon className="w-5 h-5" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-[#111827] dark:text-[#F5F7F7]">
+                {user?.displayName || 'Usuário Autenticado'}
+              </h3>
+              <p className="text-[11px] text-[#6B7280] dark:text-[#A9B1B1]">
+                {user?.email || 'Sem e-mail informado'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            id="btn-settings-signout"
+            onClick={handleSignOut}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#EF4444]/30 dark:border-[#FF4D55]/30 text-xs font-medium text-[#EF4444] dark:text-[#FF4D55] hover:bg-[#EF4444]/10 dark:hover:bg-[#FF4D55]/10 active:scale-95 transition-all cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sair</span>
+          </button>
         </div>
       </div>
 
@@ -92,7 +141,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onClose }) => {
         <div className="p-3 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1214] border border-[#E5E7EB] dark:border-[#222E30] font-mono text-[11px] space-y-1 text-[#6B7280] dark:text-[#A9B1B1]">
           <div><strong className="text-[#111827] dark:text-[#F5F7F7]">Project ID:</strong> {firebaseConfig.projectId}</div>
           <div><strong className="text-[#111827] dark:text-[#F5F7F7]">Auth Domain:</strong> {firebaseConfig.authDomain}</div>
-          <div><strong className="text-[#111827] dark:text-[#F5F7F7]">App ID:</strong> {firebaseConfig.appId}</div>
+          <div><strong className="text-[#111827] dark:text-[#F5F7F7]">User ID:</strong> <span className="break-all">{user?.uid || '—'}</span></div>
           <div><strong className="text-[#111827] dark:text-[#F5F7F7]">Status:</strong> <span className="text-[#22A45D] dark:text-[#39D47A]">Conectado ao mesmo banco do Android</span></div>
         </div>
       </div>
