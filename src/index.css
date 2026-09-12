@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-bg: #FAFAFB;
+    --color-card: #FFFFFF;
+    --color-text-main: #111827;
+    --color-text-sub: #6B7280;
+    --color-brand-green: #22A45D;
+    --color-brand-red: #EF4444;
+    --color-brand-orange: #F59E0B;
+    --color-border: #E5E7EB;
+    --color-nav-bg: rgba(255, 255, 255, 0.95);
+    --radius-card: 20px;
+  }
+
+  .dark {
+    --color-bg: #0D1214;
+    --color-card: #172021;
+    --color-text-main: #F5F7F7;
+    --color-text-sub: #A9B1B1;
+    --color-brand-green: #39D47A;
+    --color-brand-red: #FF4D55;
+    --color-brand-orange: #FF9F1C;
+    --color-border: #222E30;
+    --color-nav-bg: rgba(23, 32, 33, 0.95);
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text-main);
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    min-height: 100vh;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Custom utility classes aligned with design tokens */
+.bg-app {
+  background-color: var(--color-bg);
+}
+
+.bg-card-custom {
+  background-color: var(--color-card);
+}
+
+.text-main {
+  color: var(--color-text-main);
+}
+
+.text-sub {
+  color: var(--color-text-sub);
+}
+
+.text-brand-green {
+  color: var(--color-brand-green);
+}
+
+.bg-brand-green {
+  background-color: var(--color-brand-green);
+}
+
+.text-brand-red {
+  color: var(--color-brand-red);
+}
+
+.bg-brand-red {
+  background-color: var(--color-brand-red);
+}
+
+.text-brand-orange {
+  color: var(--color-brand-orange);
+}
+
+.bg-brand-orange {
+  background-color: var(--color-brand-orange);
+}
+
+.border-custom {
+  border-color: var(--color-border);
+}
+
+.card-radius {
+  border-radius: var(--radius-card);
+}
+
+/* Safe area inset for modern mobile devices (iPhone notch/home indicator) */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 16px);
+}

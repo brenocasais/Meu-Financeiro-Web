@@ -1,0 +1,6 @@
+{
+  "name": "Meu Financeiro",
+  "description": "App Web de orçamento pessoal estilo envelope (YNAB) integrado ao Firebase em tempo real.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
