@@ -60,6 +60,7 @@ export const AppLayout: React.FC = () => {
     <div className="min-h-screen bg-[#FAFAFB] dark:bg-[#0D1214] text-[#111827] dark:text-[#F5F7F7] flex flex-col transition-colors duration-150">
       <OfflineBanner />
       
+      {/* Header global do app */}
       <Header
         onOpenSettings={toggleSettings}
         isSettingsOpen={isSettingsOpen}
@@ -72,7 +73,12 @@ export const AppLayout: React.FC = () => {
           <SettingsScreen onClose={() => setIsSettingsOpen(false)} />
         ) : (
           <>
-            {activeTab === 'home' && <HomeScreen />}
+            {activeTab === 'home' && (
+              <HomeScreen
+                onNavigateTab={handleSelectTab}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+              />
+            )}
             {activeTab === 'transactions' && <TransactionsScreen />}
             {activeTab === 'planning' && <PlanningScreen />}
             {activeTab === 'metrics' && <MetricsScreen />}
