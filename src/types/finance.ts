@@ -36,6 +36,10 @@ export interface Transaction {
   value: number;
   description: string;
   date: string; // YYYY-MM-DD
+  installment_plan_id?: string | null;
+  installment_number?: number | null;
+  installment_total?: number | null;
+  recurrence_rule_id?: string | null;
 }
 
 export interface BudgetAllocation {

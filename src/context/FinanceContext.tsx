@@ -166,7 +166,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Receitas do mês
     const income = data.transactions.reduce((acc, tx) => {
-      if (tx.type === 'RECEITA' && tx.date.startsWith(selectedMonth)) {
+      if (tx.type === 'RECEITA' && String(tx.date || '').startsWith(selectedMonth)) {
         return acc + (Number(tx.value) || 0);
       }
       return acc;
@@ -174,7 +174,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Despesas do mês
     const expenses = data.transactions.reduce((acc, tx) => {
-      if (tx.type === 'DESPESA' && tx.date.startsWith(selectedMonth)) {
+      if (tx.type === 'DESPESA' && String(tx.date || '').startsWith(selectedMonth)) {
         return acc + (Number(tx.value) || 0);
       }
       return acc;
@@ -196,14 +196,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     // Mês anterior
     const prevIncome = data.transactions.reduce((acc, tx) => {
-      if (tx.type === 'RECEITA' && tx.date.startsWith(prevMonth)) {
+      if (tx.type === 'RECEITA' && String(tx.date || '').startsWith(prevMonth)) {
         return acc + (Number(tx.value) || 0);
       }
       return acc;
     }, 0);
 
     const prevExpenses = data.transactions.reduce((acc, tx) => {
-      if (tx.type === 'DESPESA' && tx.date.startsWith(prevMonth)) {
+      if (tx.type === 'DESPESA' && String(tx.date || '').startsWith(prevMonth)) {
         return acc + (Number(tx.value) || 0);
       }
       return acc;
