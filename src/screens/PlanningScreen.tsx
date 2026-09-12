@@ -26,10 +26,10 @@ export const PlanningScreen: React.FC = () => {
             Fórmulas validadas na Fundação (Fase 1):
           </div>
           <div className="p-2 rounded-lg bg-[#FFFFFF] dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] font-mono text-[10.5px] text-[#22A45D] dark:text-[#39D47A] leading-relaxed">
-            Alocado = Σ(Movements destino) - Σ(Movements origem)<br />
-            Gasto = Σ(DESPESAS no mês)<br />
+            Alocado = Σ(dest_budget_allocation_id) - Σ(source_budget_allocation_id)<br />
+            Gasto = Σ(Transaction tipo DESPESA no mês)<br />
             Disponível = Alocado - Gasto<br />
-            Pronto para Atribuir = Saldo total - Σ(Disponível acumulado m ≤ mês) - Σ(current_value metas)
+            Pronto para Atribuir = Saldo total - Σ(Disponível mês ≤ selecionado) - Σ(current_value metas)
           </div>
         </div>
       </div>

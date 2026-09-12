@@ -1,79 +1,90 @@
 /**
- * Types representing the data models shared between the Android native app
- * and the Web app in Firebase Firestore for "Meu Financeiro".
+ * Modelos de dados REAIS compartilhados entre o app nativo Android em produção
+ * e este app Web, sincronizados através do documento /users/{userId} no Firebase Firestore.
  */
-
-export type TransactionType = 'RECEITA' | 'DESPESA' | 'TRANSFERENCIA';
 
 export interface Account {
   id: string;
   name: string;
+  type: "DINHEIRO" | "CONTA_CORRENTE" | "CARTAO_CREDITO";
   initial_balance: number;
-  type?: 'CHECKING' | 'SAVINGS' | 'INVESTMENT' | 'CASH' | 'CREDIT_CARD' | string;
-  color?: string;
-  created_at?: string | number | null;
-  updated_at?: string | number | null;
-  is_archived?: boolean;
+  archived: boolean;
 }
 
-export interface Transaction {
+export interface Category {
   id: string;
-  amount: number;
-  type: TransactionType;
-  date: string; // ISO string 'YYYY-MM-DD' or timestamp
-  account_id: string;
-  destination_account_id?: string | null; // Used when type is 'TRANSFERENCIA'
-  category_id?: string | null;
-  subcategory_id?: string | null;
-  description?: string;
-  notes?: string;
-  created_at?: string | number | null;
-}
-
-export type MovementEntityType = 'READY_TO_ASSIGN' | 'CATEGORY' | 'GOAL' | string;
-
-export interface AllocationMovement {
-  id: string;
-  amount: number;
-  origin_id: string; // e.g. 'READY_TO_ASSIGN', categoryId, goalId
-  destination_id: string; // e.g. 'READY_TO_ASSIGN', categoryId, goalId
-  origin_type?: MovementEntityType;
-  destination_type?: MovementEntityType;
-  month?: string; // Format 'YYYY-MM'
-  created_at?: string | number | null;
-  note?: string;
+  name: string;
+  archived: boolean;
+  icon: string | null;
 }
 
 export interface Subcategory {
   id: string;
   category_id: string;
   name: string;
-  icon?: string;
-  order?: number;
+  archived: boolean;
+  icon: string | null;
 }
 
-export interface Category {
+export interface Transaction {
   id: string;
-  name: string;
-  icon?: string;
-  color?: string;
-  order?: number;
-  subcategories?: Subcategory[];
+  account_id: string;
+  to_account_id: string | null;
+  category_id: string | null;
+  subcategory_id: string | null;
+  type: "RECEITA" | "DESPESA" | "TRANSFERENCIA";
+  value: number;
+  description: string;
+  date: string; // YYYY-MM-DD
+}
+
+export interface BudgetAllocation {
+  id: string;
+  category_id: string;
+  subcategory_id: string | null;
+  month: string; // YYYY-MM - o mês vive AQUI, não no AllocationMovement
+  planned_value: number;
+}
+
+export interface AllocationMovement {
+  id: string;
+  source_budget_allocation_id: string | null;
+  source_goal_id: string | null;
+  dest_budget_allocation_id: string | null;
+  dest_goal_id: string | null;
+  amount: number;
+  note: string | null;
+  moved_at: number;
 }
 
 export interface Goal {
   id: string;
   name: string;
-  target_amount: number;
-  target_date?: string | null; // 'YYYY-MM' or 'YYYY-MM-DD'
-  created_at?: string | number | null;
-  icon?: string;
-  color?: string;
+  target_value: number;
+  deadline: string;
+  is_paused: boolean;
+  archived: boolean;
+}
+
+/**
+ * Estrutura do documento raiz no Firestore: /users/{userId}
+ * Cada usuário possui um único documento com arrays para cada entidade.
+ */
+export interface UserFirestoreData {
+  accounts: Account[];
+  categories: Category[];
+  subcategories: Subcategory[];
+  transactions: Transaction[];
+  budget_allocations: BudgetAllocation[];
+  allocation_movements: AllocationMovement[];
+  goals: Goal[];
 }
 
 export interface CategoryMonthCalculation {
   categoryId: string;
+  subcategoryId?: string | null;
   month: string; // 'YYYY-MM'
+  planned: number;
   allocated: number;
   spent: number;
   available: number;

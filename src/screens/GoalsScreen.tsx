@@ -26,7 +26,7 @@ export const GoalsScreen: React.FC = () => {
             Fórmula de Meta (validada na Fase 1):
           </div>
           <div className="p-2 rounded-lg bg-[#FFFFFF] dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] font-mono text-[11px] text-[#22A45D] dark:text-[#39D47A]">
-            current_value = Σ(AllocationMovement destino) - Σ(AllocationMovement origem) (nunca reseta)
+            current_value = Σ(dest_goal_id) - Σ(source_goal_id) (nunca reseta)
           </div>
         </div>
       </div>
