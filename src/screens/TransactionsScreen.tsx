@@ -15,11 +15,11 @@ import {
   Wallet,
   Tag,
   Clock,
-  Sparkles,
 } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { formatCurrencyBRL } from '../lib/financeLogic';
-import { Transaction } from '../types/finance';
+import { Transaction, InstallmentPlan } from '../types/finance';
+import { TransactionFormModal } from '../components/transactions/TransactionFormModal';
 
 const MONTH_NAMES_PT = [
   'Janeiro',
@@ -133,6 +133,7 @@ export const TransactionsScreen: React.FC = () => {
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
   const [isNewTxModalOpen, setIsNewTxModalOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   // Filtros avançados
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(DEFAULT_FILTERS);
@@ -177,6 +178,14 @@ export const TransactionsScreen: React.FC = () => {
     data.subcategories.forEach((sub) => map.set(String(sub.id), sub.name));
     return map;
   }, [data.subcategories]);
+
+  const installmentPlanMap = useMemo(() => {
+    const map = new Map<string, InstallmentPlan>();
+    (data.installment_plans || []).forEach((plan) => {
+      map.set(String(plan.id), plan);
+    });
+    return map;
+  }, [data.installment_plans]);
 
   // Subcategorias filtradas pela categoria selecionada no modal de filtros
   const availableSubcategories = useMemo(() => {
@@ -443,11 +452,14 @@ export const TransactionsScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* Botão Nova Transação (placeholder para Fase 4b) */}
+          {/* Botão Nova Transação */}
           <button
             id="btn-new-transaction"
             type="button"
-            onClick={() => setIsNewTxModalOpen(true)}
+            onClick={() => {
+              setEditingTransaction(null);
+              setIsNewTxModalOpen(true);
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] text-xs font-semibold shadow-xs hover:opacity-95 active:scale-95 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -694,7 +706,12 @@ export const TransactionsScreen: React.FC = () => {
                   return (
                     <div
                       key={String(tx.id)}
-                      className="p-3 sm:p-3.5 flex items-center justify-between gap-3 hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors"
+                      onClick={() => {
+                        setEditingTransaction(tx);
+                        setIsNewTxModalOpen(true);
+                      }}
+                      className="p-3 sm:p-3.5 flex items-center justify-between gap-3 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                      title="Clique para editar esta transação"
                     >
                       {/* Lado esquerdo: Círculo de 36px + Textos */}
                       <div className="flex items-center gap-3 min-w-0">
@@ -716,12 +733,16 @@ export const TransactionsScreen: React.FC = () => {
                               {secondaryLine}
                             </span>
 
-                            {/* Badge de Parcela: "{número}/{total}" */}
-                            {tx.installment_plan_id && tx.installment_number && (
-                              <span className="px-1.5 py-0.2 rounded-md bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] text-[10px] font-bold shrink-0">
-                                {tx.installment_number}/{tx.installment_total || '?'}
-                              </span>
-                            )}
+                            {/* Badge de Parcela: "{número}/{total}" obtido de InstallmentPlan */}
+                            {tx.installment_plan_id && tx.installment_number && (() => {
+                              const plan = installmentPlanMap.get(String(tx.installment_plan_id));
+                              const totalCount = plan ? plan.installments_count : null;
+                              return (
+                                <span className="px-1.5 py-0.2 rounded-md bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] text-[10px] font-bold shrink-0">
+                                  {tx.installment_number}/{totalCount ?? '?'}
+                                </span>
+                              );
+                            })()}
 
                             {/* Ícone de repetição se tiver recurrence_rule_id */}
                             {tx.recurrence_rule_id && (
@@ -972,32 +993,16 @@ export const TransactionsScreen: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* 7. MODAL PLACEHOLDER DA FASE 4B (Nova Transação) */}
+      {/* 7. MODAL DE NOVA / EDITAR TRANSAÇÃO (Fase 4b) */}
       {/* ========================================================= */}
-      {isNewTxModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in">
-          <div className="w-full max-w-sm rounded-[22px] bg-[#FFFFFF] dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] p-6 shadow-xl space-y-4 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-[#22A45D]/10 dark:bg-[#39D47A]/10 text-[#22A45D] dark:text-[#39D47A] flex items-center justify-center mx-auto">
-              <Sparkles className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h4 className="text-sm font-bold text-[#111827] dark:text-[#F5F7F7]">
-                Nova Transação (Fase 4b)
-              </h4>
-              <p className="text-xs text-[#6B7280] dark:text-[#A9B1B1] leading-relaxed">
-                O formulário completo para criar, editar e excluir transações (com seleção de contas, categorias, parcelamento e repetição) será ativado na Fase 4b.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsNewTxModalOpen(false)}
-              className="w-full py-2.5 rounded-xl bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] text-xs font-semibold shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
-            >
-              Entendido
-            </button>
-          </div>
-        </div>
-      )}
+      <TransactionFormModal
+        isOpen={isNewTxModalOpen}
+        onClose={() => {
+          setIsNewTxModalOpen(false);
+          setEditingTransaction(null);
+        }}
+        transactionToEdit={editingTransaction}
+      />
     </div>
   );
 };

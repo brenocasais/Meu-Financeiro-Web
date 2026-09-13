@@ -10,6 +10,7 @@ import {
   BudgetAllocation,
   AllocationMovement,
   Goal,
+  InstallmentPlan,
   ReadyToAssignCalculation,
 } from '../types/finance';
 import {
@@ -49,6 +50,7 @@ interface MonthSummary {
 
 interface FinanceContextType {
   data: UserFirestoreData;
+  installmentPlans: InstallmentPlan[];
   loading: boolean;
   error: string | null;
   selectedMonth: string; // 'YYYY-MM'
@@ -99,6 +101,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     budget_allocations: [],
     allocation_movements: [],
     goals: [],
+    installment_plans: [],
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +128,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         budget_allocations: [],
         allocation_movements: [],
         goals: [],
+        installment_plans: [],
       });
       setLoading(false);
       return;
@@ -322,6 +326,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <FinanceContext.Provider
       value={{
         data,
+        installmentPlans: data.installment_plans,
         loading,
         error,
         selectedMonth,

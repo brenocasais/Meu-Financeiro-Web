@@ -38,8 +38,18 @@ export interface Transaction {
   date: string; // YYYY-MM-DD
   installment_plan_id?: string | null;
   installment_number?: number | null;
-  installment_total?: number | null;
   recurrence_rule_id?: string | null;
+}
+
+export interface InstallmentPlan {
+  id: string;
+  account_id: string;
+  category_id: string | null;
+  subcategory_id: string | null;
+  description: string;
+  total_value: number;
+  installments_count: number;
+  first_installment_month: string; // YYYY-MM
 }
 
 export interface BudgetAllocation {
@@ -82,6 +92,7 @@ export interface UserFirestoreData {
   budget_allocations: BudgetAllocation[];
   allocation_movements: AllocationMovement[];
   goals: Goal[];
+  installment_plans: InstallmentPlan[];
 }
 
 export interface CategoryMonthCalculation {
