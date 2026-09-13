@@ -27,8 +27,8 @@ export interface FinanceAlert {
   title: string;
   message: string;
   targetTab: 'planning' | 'goals';
-  categoryId?: string;
-  goalId?: string;
+  categoryId?: number;
+  goalId?: number;
 }
 
 interface MonthSummary {

@@ -16,7 +16,7 @@ export const FormulaValidator: React.FC = () => {
 
   // Verificação matemática das 6 fórmulas centrais com o schema real do Firestore (/users/{userId})
   const sampleAccount: Account = {
-    id: 'acc-1',
+    id: 1,
     name: 'Conta Corrente',
     type: 'CONTA_CORRENTE',
     initial_balance: 1000,
@@ -25,8 +25,8 @@ export const FormulaValidator: React.FC = () => {
 
   const sampleTransactions: Transaction[] = [
     {
-      id: 'tx-1',
-      account_id: 'acc-1',
+      id: 1,
+      account_id: 1,
       to_account_id: null,
       category_id: null,
       subcategory_id: null,
@@ -36,10 +36,10 @@ export const FormulaValidator: React.FC = () => {
       date: '2026-09-05',
     },
     {
-      id: 'tx-2',
-      account_id: 'acc-1',
+      id: 2,
+      account_id: 1,
       to_account_id: null,
-      category_id: 'cat-1',
+      category_id: 10,
       subcategory_id: null,
       type: 'DESPESA',
       value: 200,
@@ -47,9 +47,9 @@ export const FormulaValidator: React.FC = () => {
       date: '2026-09-10',
     },
     {
-      id: 'tx-3',
-      account_id: 'acc-1',
-      to_account_id: 'acc-2',
+      id: 3,
+      account_id: 1,
+      to_account_id: 2,
       category_id: null,
       subcategory_id: null,
       type: 'TRANSFERENCIA',
@@ -61,8 +61,8 @@ export const FormulaValidator: React.FC = () => {
 
   const sampleBudgetAllocations: BudgetAllocation[] = [
     {
-      id: 'alloc-1',
-      category_id: 'cat-1',
+      id: 100,
+      category_id: 10,
       subcategory_id: null,
       month: '2026-09',
       planned_value: 400,
@@ -71,31 +71,31 @@ export const FormulaValidator: React.FC = () => {
 
   const sampleMovements: AllocationMovement[] = [
     {
-      id: 'mov-1',
+      id: 1001,
       source_budget_allocation_id: null,
       source_goal_id: null,
-      dest_budget_allocation_id: 'alloc-1',
+      dest_budget_allocation_id: 100,
       dest_goal_id: null,
       amount: 400,
       note: 'Distribuição inicial',
       moved_at: 1726000000,
     },
     {
-      id: 'mov-2',
-      source_budget_allocation_id: 'alloc-1',
+      id: 1002,
+      source_budget_allocation_id: 100,
       source_goal_id: null,
-      dest_budget_allocation_id: 'alloc-other',
+      dest_budget_allocation_id: 999,
       dest_goal_id: null,
       amount: 50,
       note: 'Remanejamento de categoria',
       moved_at: 1726000001,
     },
     {
-      id: 'mov-3',
+      id: 1003,
       source_budget_allocation_id: null,
       source_goal_id: null,
       dest_budget_allocation_id: null,
-      dest_goal_id: 'goal-1',
+      dest_goal_id: 501,
       amount: 300,
       note: 'Aporte na meta',
       moved_at: 1726000002,
@@ -103,7 +103,7 @@ export const FormulaValidator: React.FC = () => {
   ];
 
   const sampleGoal: Goal = {
-    id: 'goal-1',
+    id: 501,
     name: 'Reserva de Emergência',
     target_value: 5000,
     deadline: '2027-12-31',
@@ -115,16 +115,16 @@ export const FormulaValidator: React.FC = () => {
   const balance = calculateAccountBalance(sampleAccount, sampleTransactions); // 1000 + 500 - 200 - 150 = 1150
 
   // 2. Alocado categoria/mês: via BudgetAllocation (dest_budget_allocation_id - source_budget_allocation_id)
-  const allocated = calculateCategoryAllocated('cat-1', '2026-09', sampleBudgetAllocations, sampleMovements); // 400 - 50 = 350
+  const allocated = calculateCategoryAllocated(10, '2026-09', sampleBudgetAllocations, sampleMovements); // 400 - 50 = 350
 
   // 3. Gasto categoria/mês: soma de DESPESA com date no mês
-  const spent = calculateCategorySpent('cat-1', '2026-09', sampleTransactions); // 200
+  const spent = calculateCategorySpent(10, '2026-09', sampleTransactions); // 200
 
   // 4. Disponível: Alocado - Gasto
   const available = calculateCategoryAvailable(allocated, spent); // 350 - 200 = 150
 
   // 5. Goal current_value: dest_goal_id - source_goal_id (nunca reseta)
-  const goalValue = calculateGoalCurrentValue('goal-1', sampleMovements); // 300
+  const goalValue = calculateGoalCurrentValue(501, sampleMovements); // 300
 
   // 6. Pronto para Atribuir: Saldo total - Σ(Disponível mês <= selecionado) - Σ(current_value metas)
   const rta = calculateReadyToAssign(

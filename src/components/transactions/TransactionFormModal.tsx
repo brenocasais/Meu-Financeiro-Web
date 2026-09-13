@@ -9,6 +9,7 @@ import {
   createSubcategory,
 } from '../../firebase/firestore';
 import { Transaction } from '../../types/finance';
+import { generateNumericId } from '../../lib/financeLogic';
 
 interface TransactionFormModalProps {
   isOpen: boolean;
@@ -251,7 +252,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       setSaving(true);
       const created = await createSubcategory(
         user.uid,
-        categoryId,
+        Number(categoryId),
         newSubcategoryName.trim(),
         data.subcategories
       );
@@ -316,25 +317,25 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     try {
       setSaving(true);
 
-      // Objeto da transação com TODOS os campos solicitados garantidos
-      const txPayload: Omit<Transaction, 'id'> & { id?: string } = {
-        ...(transactionToEdit?.id ? { id: transactionToEdit.id } : {}),
-        account_id: String(accountId),
-        to_account_id: type === 'TRANSFERENCIA' ? String(toAccountId) : null,
-        category_id: type !== 'TRANSFERENCIA' ? String(categoryId) : null,
-        subcategory_id: type !== 'TRANSFERENCIA' && subcategoryId ? String(subcategoryId) : null,
+      // Objeto da transação com TODOS os campos solicitados e IDs estritamente numéricos
+      const txPayload: Omit<Transaction, 'id'> & { id?: number } = {
+        ...(transactionToEdit?.id ? { id: Number(transactionToEdit.id) } : { id: generateNumericId() }),
+        account_id: Number(accountId),
+        to_account_id: type === 'TRANSFERENCIA' && toAccountId ? Number(toAccountId) : null,
+        category_id: type !== 'TRANSFERENCIA' && categoryId ? Number(categoryId) : null,
+        subcategory_id: type !== 'TRANSFERENCIA' && subcategoryId ? Number(subcategoryId) : null,
         type,
         value: numericValue,
         description: description.trim(),
         date: isoDate, // Salvo estritamente como YYYY-MM-DD
-        ...(transactionToEdit?.installment_plan_id
-          ? { installment_plan_id: String(transactionToEdit.installment_plan_id) }
+        ...(transactionToEdit?.installment_plan_id != null
+          ? { installment_plan_id: Number(transactionToEdit.installment_plan_id) }
           : {}),
-        ...(transactionToEdit?.installment_number
+        ...(transactionToEdit?.installment_number != null
           ? { installment_number: Number(transactionToEdit.installment_number) }
           : {}),
-        ...(transactionToEdit?.recurrence_rule_id
-          ? { recurrence_rule_id: String(transactionToEdit.recurrence_rule_id) }
+        ...(transactionToEdit?.recurrence_rule_id != null
+          ? { recurrence_rule_id: Number(transactionToEdit.recurrence_rule_id) }
           : {}),
       };
 
@@ -353,7 +354,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     if (!user || !transactionToEdit?.id) return;
     try {
       setSaving(true);
-      await deleteTransaction(user.uid, String(transactionToEdit.id), data.transactions);
+      await deleteTransaction(user.uid, Number(transactionToEdit.id), data.transactions);
       onClose();
     } catch (err: any) {
       console.error('Erro ao excluir transação no Firestore:', err);

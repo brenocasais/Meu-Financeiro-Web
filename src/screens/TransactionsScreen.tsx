@@ -162,27 +162,27 @@ export const TransactionsScreen: React.FC = () => {
 
   // Mapeamentos rápidos para O(1)
   const accountMap = useMemo(() => {
-    const map = new Map<string, string>();
-    data.accounts.forEach((acc) => map.set(String(acc.id), acc.name));
+    const map = new Map<number, string>();
+    data.accounts.forEach((acc) => map.set(acc.id, acc.name));
     return map;
   }, [data.accounts]);
 
   const categoryMap = useMemo(() => {
-    const map = new Map<string, string>();
-    data.categories.forEach((cat) => map.set(String(cat.id), cat.name));
+    const map = new Map<number, string>();
+    data.categories.forEach((cat) => map.set(cat.id, cat.name));
     return map;
   }, [data.categories]);
 
   const subcategoryMap = useMemo(() => {
-    const map = new Map<string, string>();
-    data.subcategories.forEach((sub) => map.set(String(sub.id), sub.name));
+    const map = new Map<number, string>();
+    data.subcategories.forEach((sub) => map.set(sub.id, sub.name));
     return map;
   }, [data.subcategories]);
 
   const installmentPlanMap = useMemo(() => {
-    const map = new Map<string, InstallmentPlan>();
+    const map = new Map<number, InstallmentPlan>();
     (data.installment_plans || []).forEach((plan) => {
-      map.set(String(plan.id), plan);
+      map.set(plan.id, plan);
     });
     return map;
   }, [data.installment_plans]);
@@ -217,9 +217,9 @@ export const TransactionsScreen: React.FC = () => {
       // Busca por texto (descrição, nome de categoria ou subcategoria)
       if (query) {
         const descMatch = (tx.description || '').toLowerCase().includes(query);
-        const catName = tx.category_id ? (categoryMap.get(String(tx.category_id)) || '').toLowerCase() : '';
+        const catName = tx.category_id != null ? (categoryMap.get(tx.category_id) || '').toLowerCase() : '';
         const catMatch = catName.includes(query);
-        const subName = tx.subcategory_id ? (subcategoryMap.get(String(tx.subcategory_id)) || '').toLowerCase() : '';
+        const subName = tx.subcategory_id != null ? (subcategoryMap.get(tx.subcategory_id) || '').toLowerCase() : '';
         const subMatch = subName.includes(query);
 
         if (!descMatch && !catMatch && !subMatch) return false;
@@ -690,9 +690,9 @@ export const TransactionsScreen: React.FC = () => {
                   // Linha secundária:
                   // se transferência: "{conta origem} → {conta destino}"
                   // senão: "{categoria} • {conta}" (categoria omitida se não tiver)
-                  const originAccountName = accountMap.get(String(tx.account_id)) || 'Conta';
-                  const destAccountName = tx.to_account_id ? accountMap.get(String(tx.to_account_id)) || 'Conta' : '';
-                  const categoryName = tx.category_id ? categoryMap.get(String(tx.category_id)) : null;
+                  const originAccountName = accountMap.get(tx.account_id) || 'Conta';
+                  const destAccountName = tx.to_account_id != null ? accountMap.get(tx.to_account_id) || 'Conta' : '';
+                  const categoryName = tx.category_id != null ? categoryMap.get(tx.category_id) : null;
 
                   let secondaryLine = '';
                   if (isTransfer) {
@@ -705,7 +705,7 @@ export const TransactionsScreen: React.FC = () => {
 
                   return (
                     <div
-                      key={String(tx.id)}
+                      key={tx.id}
                       onClick={() => {
                         setEditingTransaction(tx);
                         setIsNewTxModalOpen(true);
@@ -734,8 +734,8 @@ export const TransactionsScreen: React.FC = () => {
                             </span>
 
                             {/* Badge de Parcela: "{número}/{total}" obtido de InstallmentPlan */}
-                            {tx.installment_plan_id && tx.installment_number && (() => {
-                              const plan = installmentPlanMap.get(String(tx.installment_plan_id));
+                            {tx.installment_plan_id != null && tx.installment_number && (() => {
+                              const plan = installmentPlanMap.get(tx.installment_plan_id);
                               const totalCount = plan ? plan.installments_count : null;
                               return (
                                 <span className="px-1.5 py-0.2 rounded-md bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] text-[10px] font-bold shrink-0">

@@ -16,6 +16,14 @@ import {
  */
 
 /**
+ * Gera um ID numérico inteiro compatível com o tipo Int (32-bit signed) do Kotlin no Android.
+ * Evita colisões com os IDs sequenciais baixos (1, 2, 3...) já existentes.
+ */
+export function generateNumericId(): number {
+  return Math.floor(Math.random() * 1_000_000_000) + 1_000_000;
+}
+
+/**
  * 1. Saldo de conta:
  * Saldo de conta = initial_balance + créditos (RECEITA, TRANSFERENCIA recebida) - débitos (DESPESA, TRANSFERENCIA enviada)
  */
@@ -70,7 +78,7 @@ export function calculateTotalAccountsBalance(
  * Alocado = Σ(dest_budget_allocation_id === id) - Σ(source_budget_allocation_id === id)
  */
 export function calculateBudgetAllocationAllocated(
-  budgetAllocationId: string,
+  budgetAllocationId: number,
   allocationMovements: AllocationMovement[]
 ): number {
   return allocationMovements.reduce((sum, movement) => {
@@ -92,11 +100,11 @@ export function calculateBudgetAllocationAllocated(
  * menos onde source_budget_allocation_id é essa mesma BudgetAllocation.
  */
 export function calculateCategoryAllocated(
-  categoryId: string,
+  categoryId: number,
   month: string, // YYYY-MM
   budgetAllocations: BudgetAllocation[],
   allocationMovements: AllocationMovement[],
-  subcategoryId?: string | null
+  subcategoryId?: number | null
 ): number {
   // Filtra as alocações da categoria para o mês solicitado
   const matchingAllocations = budgetAllocations.filter((b) => {
@@ -117,10 +125,10 @@ export function calculateCategoryAllocated(
  * Gasto de uma categoria/mês = soma de Transaction tipo DESPESA daquela categoria/subcategoria, no mês
  */
 export function calculateCategorySpent(
-  categoryId: string,
+  categoryId: number,
   month: string, // YYYY-MM
   transactions: Transaction[],
-  subcategoryId?: string | null
+  subcategoryId?: number | null
 ): number {
   return transactions.reduce((sum, tx) => {
     if (tx.type !== 'DESPESA') return sum;
@@ -193,7 +201,7 @@ export function calculateCategoryAvailable(
  *                            - onde source_goal_id é a meta (nunca reseta)
  */
 export function calculateGoalCurrentValue(
-  goalId: string,
+  goalId: number,
   allocationMovements: AllocationMovement[]
 ): number {
   return allocationMovements.reduce((sum, movement) => {
@@ -261,12 +269,12 @@ export function calculateReadyToAssign(
  * incluindo o Planejado (planned_value em BudgetAllocation).
  */
 export function getCategoryMonthCalculation(
-  categoryId: string,
+  categoryId: number,
   month: string,
   budgetAllocations: BudgetAllocation[],
   allocationMovements: AllocationMovement[],
   transactions: Transaction[],
-  subcategoryId?: string | null
+  subcategoryId?: number | null
 ): CategoryMonthCalculation {
   const matchingAllocations = budgetAllocations.filter((b) => {
     if (b.category_id !== categoryId || b.month !== month) return false;

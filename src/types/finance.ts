@@ -1,10 +1,13 @@
 /**
  * Modelos de dados REAIS compartilhados entre o app nativo Android em produção
  * e este app Web, sincronizados através do documento /users/{userId} no Firebase Firestore.
+ * 
+ * NOTA CRÍTICA: No Android / Firestore, todos os IDs e chaves estrangeiras (*_id)
+ * são representados estritamente como NÚMEROS INTEIROS (Int de 32 bits no Kotlin).
  */
 
 export interface Account {
-  id: string;
+  id: number;
   name: string;
   type: "DINHEIRO" | "CONTA_CORRENTE" | "CARTAO_CREDITO";
   initial_balance: number;
@@ -12,40 +15,40 @@ export interface Account {
 }
 
 export interface Category {
-  id: string;
+  id: number;
   name: string;
   archived: boolean;
   icon: string | null;
 }
 
 export interface Subcategory {
-  id: string;
-  category_id: string;
+  id: number;
+  category_id: number;
   name: string;
   archived: boolean;
   icon: string | null;
 }
 
 export interface Transaction {
-  id: string;
-  account_id: string;
-  to_account_id: string | null;
-  category_id: string | null;
-  subcategory_id: string | null;
+  id: number;
+  account_id: number;
+  to_account_id: number | null;
+  category_id: number | null;
+  subcategory_id: number | null;
   type: "RECEITA" | "DESPESA" | "TRANSFERENCIA";
   value: number;
   description: string;
   date: string; // YYYY-MM-DD
-  installment_plan_id?: string | null;
+  installment_plan_id?: number | null;
   installment_number?: number | null;
-  recurrence_rule_id?: string | null;
+  recurrence_rule_id?: number | null;
 }
 
 export interface InstallmentPlan {
-  id: string;
-  account_id: string;
-  category_id: string | null;
-  subcategory_id: string | null;
+  id: number;
+  account_id: number;
+  category_id: number | null;
+  subcategory_id: number | null;
   description: string;
   total_value: number;
   installments_count: number;
@@ -53,26 +56,26 @@ export interface InstallmentPlan {
 }
 
 export interface BudgetAllocation {
-  id: string;
-  category_id: string;
-  subcategory_id: string | null;
+  id: number;
+  category_id: number;
+  subcategory_id: number | null;
   month: string; // YYYY-MM - o mês vive AQUI, não no AllocationMovement
   planned_value: number;
 }
 
 export interface AllocationMovement {
-  id: string;
-  source_budget_allocation_id: string | null;
-  source_goal_id: string | null;
-  dest_budget_allocation_id: string | null;
-  dest_goal_id: string | null;
+  id: number;
+  source_budget_allocation_id: number | null;
+  source_goal_id: number | null;
+  dest_budget_allocation_id: number | null;
+  dest_goal_id: number | null;
   amount: number;
   note: string | null;
   moved_at: number;
 }
 
 export interface Goal {
-  id: string;
+  id: number;
   name: string;
   target_value: number;
   deadline: string;
@@ -96,8 +99,8 @@ export interface UserFirestoreData {
 }
 
 export interface CategoryMonthCalculation {
-  categoryId: string;
-  subcategoryId?: string | null;
+  categoryId: number;
+  subcategoryId?: number | null;
   month: string; // 'YYYY-MM'
   planned: number;
   allocated: number;
