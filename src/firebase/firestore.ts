@@ -181,23 +181,24 @@ export async function saveTransaction(
     ...(tx.recurrence_rule_id != null ? { recurrence_rule_id: Number(tx.recurrence_rule_id) } : {}),
   };
 
-  if (tx.id) {
-    // Modo Edição: substitui o item específico no array
-    const updatedTransactions = currentTransactions.map((t) =>
-      Number(t.id) === Number(targetId) ? savedTx : t
-    );
+  // Determina se é edição checando se o targetId realmente já existe na lista atual
+  const isEditing = currentTransactions.some((t) => Number(t.id) === Number(targetId));
+
+  const updatedTransactions = isEditing
+    ? currentTransactions.map((t) => (Number(t.id) === Number(targetId) ? savedTx : t))
+    : [savedTx, ...currentTransactions];
+
+  try {
+    await updateDoc(docRef, { transactions: updatedTransactions });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em saveTransaction, tentando setDoc merge...', firstErr);
     try {
-      await updateDoc(docRef, { transactions: updatedTransactions });
-    } catch {
       await setDoc(docRef, { transactions: updatedTransactions }, { merge: true });
-    }
-  } else {
-    // Nova Transação: usa updateDoc com arrayUnion (ou fallback com setDoc)
-    try {
-      await updateDoc(docRef, { transactions: arrayUnion(savedTx) });
-    } catch {
-      const updatedTransactions = [savedTx, ...currentTransactions];
-      await setDoc(docRef, { transactions: updatedTransactions }, { merge: true });
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao salvar transação: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
     }
   }
 

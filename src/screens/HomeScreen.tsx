@@ -18,6 +18,7 @@ import {
   ChevronDown,
   X,
   Sparkles,
+  Calendar,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useFinance, FinanceAlert } from '../context/FinanceContext';
@@ -27,6 +28,7 @@ import {
   calculateAccountBalance,
 } from '../lib/financeLogic';
 import { Account } from '../types/finance';
+import { MonthYearPicker } from '../components/common/MonthYearPicker';
 
 interface HomeScreenProps {
   onNavigateTab?: (tab: TabType) => void;
@@ -131,69 +133,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             {greeting}
           </h2>
 
-          {/* Seletor de Mês por extenso com seta */}
+          {/* Seletor de Mês por extenso em estilo Calendário */}
           <div className="relative mt-0.5">
             <button
               id="btn-select-month"
               type="button"
-              onClick={() => setIsMonthPickerOpen((prev) => !prev)}
+              onClick={() => setIsMonthPickerOpen(true)}
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#6B7280] dark:text-[#A9B1B1] hover:text-[#111827] dark:hover:text-[#F5F7F7] cursor-pointer transition-colors"
+              title="Clique para abrir calendário de mês e ano"
             >
+              <Calendar className="w-3.5 h-3.5 text-[#22A45D] dark:text-[#39D47A]" />
               <span>{formattedMonth}</span>
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
 
-            {/* Dropdown / Seletor de Meses */}
-            {isMonthPickerOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-40"
-                  onClick={() => setIsMonthPickerOpen(false)}
-                />
-                <div className="absolute left-0 top-full mt-2 z-50 w-52 rounded-[18px] bg-[#FFFFFF] dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] shadow-lg p-2 max-h-64 overflow-y-auto">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-[#6B7280] dark:text-[#A9B1B1] px-2 py-1">
-                    Selecionar Mês
-                  </div>
-                  {/* Gera lista de meses (ano anterior, atual e seguinte) */}
-                  {(() => {
-                    const currentYear = new Date().getFullYear();
-                    const years = [currentYear - 1, currentYear, currentYear + 1];
-                    const items: { label: string; value: string }[] = [];
-
-                    years.forEach((yr) => {
-                      MONTH_NAMES_PT.forEach((mName, idx) => {
-                        const mVal = String(idx + 1).padStart(2, '0');
-                        items.push({
-                          label: `${mName} ${yr}`,
-                          value: `${yr}-${mVal}`,
-                        });
-                      });
-                    });
-
-                    return items.map((item) => {
-                      const isSelected = item.value === selectedMonth;
-                      return (
-                        <button
-                          key={item.value}
-                          type="button"
-                          onClick={() => {
-                            setSelectedMonth(item.value);
-                            setIsMonthPickerOpen(false);
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-xl text-xs font-medium cursor-pointer transition-colors ${
-                            isSelected
-                              ? 'bg-[#22A45D]/10 dark:bg-[#39D47A]/10 text-[#22A45D] dark:text-[#39D47A] font-bold'
-                              : 'text-[#111827] dark:text-[#F5F7F7] hover:bg-black/5 dark:hover:bg-white/5'
-                          }`}
-                        >
-                          {item.label}
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-              </>
-            )}
+            <MonthYearPicker
+              isOpen={isMonthPickerOpen}
+              onClose={() => setIsMonthPickerOpen(false)}
+              selectedMonth={selectedMonth}
+              onChange={(newMonth) => setSelectedMonth(newMonth)}
+            />
           </div>
         </div>
 

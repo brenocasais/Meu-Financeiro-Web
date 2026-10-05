@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { X, Trash2, Plus, AlertCircle, Calendar } from 'lucide-react';
+import { X, Trash2, Plus, AlertCircle, Calendar, CheckCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../firebase/firestore';
 import { Transaction } from '../../types/finance';
 import { generateNumericId } from '../../lib/financeLogic';
+import { DatePickerCalendar } from '../common/DatePickerCalendar';
 
 interface TransactionFormModalProps {
   isOpen: boolean;
@@ -81,6 +82,8 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   // Estados de controle e feedback
   const [saving, setSaving] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [diagnosticStatus, setDiagnosticStatus] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
 
   // Estados para modais de criar categoria/subcategoria rápida
@@ -89,8 +92,9 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   const [isCreatingSubcategory, setIsCreatingSubcategory] = useState<boolean>(false);
   const [newSubcategoryName, setNewSubcategoryName] = useState<string>('');
 
-  // Referência para o seletor nativo de calendário
+  // Referência para o seletor nativo de calendário e estado do calendário interativo
   const hiddenDateInputRef = useRef<HTMLInputElement>(null);
+  const [isCalendarOpen, setIsCalendarOpen] = useState<boolean>(false);
 
   const isEditing = Boolean(transactionToEdit);
 
@@ -130,10 +134,18 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     if (!isOpen) {
       setShowDeleteConfirm(false);
       setFormError(null);
+      setDiagnosticStatus(null);
+      setSuccessMessage(null);
       setIsCreatingCategory(false);
       setIsCreatingSubcategory(false);
+      setIsCalendarOpen(false);
       return;
     }
+
+    setFormError(null);
+    setDiagnosticStatus(null);
+    setSuccessMessage(null);
+    setIsCalendarOpen(false);
 
     if (transactionToEdit) {
       // Modo Edição: carregar dados existentes
@@ -266,43 +278,57 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     }
   };
 
+  // Registra no console informações do processo de salvamento
+  const logDiagnostic = (msg: string) => {
+    console.log('[TRANSAÇÃO]', msg);
+  };
+
   // Salvar transação no Firestore com validação rigorosa
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setFormError(null);
+    setSuccessMessage(null);
+
+    logDiagnostic('handleSave iniciado');
 
     if (!user) {
-      setFormError('Usuário não autenticado.');
+      const err = 'Usuário não autenticado no Firebase.';
+      setFormError(err);
       return;
     }
 
     // 1. Validação de Valor: não permitir vazio ou zero
     const numericValue = parseFloat(valueStr.replace(',', '.'));
     if (isNaN(numericValue) || numericValue <= 0) {
-      setFormError('Informe um valor válido maior que zero.');
+      const err = 'Informe um valor válido maior que zero.';
+      setFormError(err);
       return;
     }
 
     // 2. Validação de Conta
     if (!accountId) {
-      setFormError('Selecione uma conta.');
+      const err = 'Selecione uma conta.';
+      setFormError(err);
       return;
     }
 
     // 3. Validação se Transferência
     if (type === 'TRANSFERENCIA') {
       if (!toAccountId) {
-        setFormError('Selecione a conta de destino.');
+        const err = 'Selecione a conta de destino.';
+        setFormError(err);
         return;
       }
       if (accountId === toAccountId) {
-        setFormError('A conta de origem e a de destino não podem ser iguais.');
+        const err = 'A conta de origem e a de destino não podem ser iguais.';
+        setFormError(err);
         return;
       }
     } else {
       // 4. Validação de Categoria (se não for transferência)
       if (!categoryId) {
-        setFormError('Selecione uma categoria.');
+        const err = 'Selecione uma categoria.';
+        setFormError(err);
         return;
       }
     }
@@ -310,16 +336,21 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     // 5. Validação e conversão de Data DD/MM/AAAA -> YYYY-MM-DD
     const isoDate = brlToIso(dateBrl);
     if (!isoDate) {
-      setFormError('Informe uma data válida no formato DD/MM/AAAA (ex: 12/09/2026).');
+      const err = 'Informe uma data válida no formato DD/MM/AAAA (ex: 12/09/2026).';
+      setFormError(err);
       return;
     }
+
+    setDiagnosticStatus('Salvando no Firestore...');
 
     try {
       setSaving(true);
 
-      // Objeto da transação com TODOS os campos solicitados e IDs estritamente numéricos
+      // Objeto da transação com campos solicitados e IDs estritamente numéricos
+      const isEditingTx = Boolean(transactionToEdit?.id);
+      const targetNumericId = isEditingTx ? Number(transactionToEdit!.id) : generateNumericId();
       const txPayload: Omit<Transaction, 'id'> & { id?: number } = {
-        ...(transactionToEdit?.id ? { id: Number(transactionToEdit.id) } : { id: generateNumericId() }),
+        ...(isEditingTx ? { id: targetNumericId } : {}),
         account_id: Number(accountId),
         to_account_id: type === 'TRANSFERENCIA' && toAccountId ? Number(toAccountId) : null,
         category_id: type !== 'TRANSFERENCIA' && categoryId ? Number(categoryId) : null,
@@ -339,11 +370,21 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
           : {}),
       };
 
-      await saveTransaction(user.uid, txPayload, data.transactions);
-      onClose();
+      const savedTx = await saveTransaction(user.uid, txPayload, data.transactions);
+
+      const successText = `Transação salva com sucesso! (ID: ${savedTx.id})`;
+      logDiagnostic(successText);
+      setDiagnosticStatus(null);
+      setSuccessMessage(successText);
+
+      setTimeout(() => {
+        onClose();
+      }, 1000);
     } catch (err: any) {
       console.error('Erro ao salvar transação no Firestore:', err);
-      setFormError(err.message || 'Erro ao salvar transação no Firestore.');
+      const errMsg = err?.message || 'Erro ao salvar transação no Firestore.';
+      setFormError(errMsg);
+      setDiagnosticStatus(null);
     } finally {
       setSaving(false);
     }
@@ -395,6 +436,41 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* === Notificações e Status no Topo do Modal === */}
+        {(diagnosticStatus || formError || successMessage) && (
+          <div className="px-5 py-2.5 border-b border-[#E5E7EB] dark:border-[#222E30] bg-[#F8FAFC] dark:bg-[#0E1517] space-y-2">
+            {diagnosticStatus && (
+              <div
+                id="diagnostic-status-top"
+                className="p-2.5 rounded-xl bg-[#2563EB]/10 border border-[#2563EB]/30 text-[#2563EB] dark:text-[#60A5FA] text-xs font-semibold flex items-center gap-2"
+              >
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span>{diagnosticStatus}</span>
+              </div>
+            )}
+
+            {formError && (
+              <div
+                id="diagnostic-error-top"
+                className="p-2.5 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] dark:text-[#FF4D55] text-xs font-semibold flex items-center gap-2"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            {successMessage && (
+              <div
+                id="diagnostic-success-top"
+                className="p-2.5 rounded-xl bg-[#22A45D]/10 border border-[#22A45D]/30 text-[#22A45D] dark:text-[#39D47A] text-xs font-semibold flex items-center gap-2"
+              >
+                <CheckCircle className="w-4 h-4 shrink-0" />
+                <span>{successMessage}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Diálogo de confirmação de exclusão */}
         {showDeleteConfirm ? (
@@ -758,7 +834,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
               </div>
             )}
 
-            {/* === 6. CAMPO DATA (Formato Brasileiro DD/MM/AAAA) === */}
+            {/* === 6. CAMPO DATA (Formato Brasileiro DD/MM/AAAA com Calendário) === */}
             <div>
               <label
                 htmlFor="input-tx-date"
@@ -777,40 +853,61 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                   className="w-full pl-3.5 pr-10 py-2.5 rounded-xl bg-[#F9FAFB] dark:bg-[#0D1214] border border-[#E5E7EB] dark:border-[#222E30] text-sm text-[#111827] dark:text-[#F5F7F7] focus:outline-hidden focus:border-[#22A45D] dark:focus:border-[#39D47A] transition-colors"
                 />
 
-                {/* Input nativo oculto sincronizado para disparar o seletor nativo de calendário */}
-                <input
-                  type="date"
-                  ref={hiddenDateInputRef}
-                  tabIndex={-1}
-                  value={currentIsoDate}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setDateBrl(isoToBrl(e.target.value));
-                    }
-                  }}
-                  className="sr-only"
-                />
-
                 <button
                   type="button"
-                  onClick={() => {
-                    if (hiddenDateInputRef.current && 'showPicker' in hiddenDateInputRef.current) {
-                      try {
-                        hiddenDateInputRef.current.showPicker();
-                      } catch {
-                        hiddenDateInputRef.current.focus();
-                      }
-                    } else if (hiddenDateInputRef.current) {
-                      hiddenDateInputRef.current.focus();
-                    }
-                  }}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-[#6B7280] dark:text-[#A9B1B1] hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
-                  title="Abrir calendário"
+                  onClick={() => setIsCalendarOpen(true)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-[#22A45D] dark:text-[#39D47A] hover:bg-[#22A45D]/10 cursor-pointer transition-colors"
+                  title="Abrir calendário para escolher ano, mês e dia"
                 >
                   <Calendar className="w-4 h-4" />
                 </button>
               </div>
+
+              {/* Calendário Interativo para escolher ano, mês e dia */}
+              <DatePickerCalendar
+                isOpen={isCalendarOpen}
+                onClose={() => setIsCalendarOpen(false)}
+                selectedDateIso={brlToIso(dateBrl) || undefined}
+                onSelectDate={(_iso, brl) => {
+                  setDateBrl(brl);
+                }}
+              />
             </div>
+
+            {/* === Notificações e Status no Rodapé do Formulário === */}
+            {(diagnosticStatus || formError || successMessage) && (
+              <div className="p-3 rounded-xl border border-[#E5E7EB] dark:border-[#222E30] bg-[#F9FAFB] dark:bg-[#131C1E] space-y-2">
+                {diagnosticStatus && (
+                  <div
+                    id="diagnostic-status-bottom"
+                    className="p-2.5 rounded-xl bg-[#2563EB]/10 border border-[#2563EB]/30 text-[#2563EB] dark:text-[#60A5FA] text-xs font-semibold flex items-center gap-2"
+                  >
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>{diagnosticStatus}</span>
+                  </div>
+                )}
+
+                {formError && (
+                  <div
+                    id="diagnostic-error-bottom"
+                    className="p-2.5 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] dark:text-[#FF4D55] text-xs font-semibold flex items-center gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{formError}</span>
+                  </div>
+                )}
+
+                {successMessage && (
+                  <div
+                    id="diagnostic-success-bottom"
+                    className="p-2.5 rounded-xl bg-[#22A45D]/10 border border-[#22A45D]/30 text-[#22A45D] dark:text-[#39D47A] text-xs font-semibold flex items-center gap-2"
+                  >
+                    <CheckCircle className="w-4 h-4 shrink-0" />
+                    <span>{successMessage}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* === 7. BOTÕES DE AÇÃO === */}
             <div className="pt-3 border-t border-[#E5E7EB] dark:border-[#222E30] flex items-center justify-between gap-2">
@@ -844,9 +941,13 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                   id="btn-save-tx"
                   type="submit"
                   disabled={saving}
-                  className="px-5 py-2.5 rounded-xl bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] text-xs font-bold shadow-xs hover:opacity-95 active:scale-95 cursor-pointer transition-all disabled:opacity-50"
+                  onClick={() => {
+                    console.log('[DEBUG] Clique capturado no botão btn-save-tx');
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] text-xs font-bold shadow-xs hover:opacity-95 active:scale-95 cursor-pointer transition-all disabled:opacity-50 flex items-center gap-1.5"
                 >
-                  {saving ? 'Salvando...' : 'Salvar'}
+                  {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{saving ? 'Salvando...' : 'Salvar'}</span>
                 </button>
               </div>
             </div>
