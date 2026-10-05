@@ -9,6 +9,10 @@ import {
   createSubcategory,
   createInstallmentPlanWithTransactions,
   createRecurrenceRuleWithTransactions,
+  updateRecurringSeries,
+  updateInstallmentSeries,
+  deleteRecurringSeries,
+  deleteInstallmentSeries,
 } from '../../firebase/firestore';
 import { Transaction } from '../../types/finance';
 import {
@@ -16,6 +20,11 @@ import {
   generateInstallmentTransactions,
   generateRecurrenceTransactions,
   collectAllExistingNumericIds,
+  updateRecurringSeriesLogic,
+  updateInstallmentSeriesLogic,
+  deleteRecurringSeriesLogic,
+  deleteInstallmentSeriesLogic,
+  removeInstallmentSuffix,
 } from '../../lib/financeLogic';
 import { DatePickerCalendar } from '../common/DatePickerCalendar';
 import { MonthYearPicker, MONTH_NAMES_FULL } from '../common/MonthYearPicker';
@@ -125,7 +134,27 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   const [endMonth, setEndMonth] = useState<string>('');
   const [isEndMonthPickerOpen, setIsEndMonthPickerOpen] = useState<boolean>(false);
 
+  // Diálogo de Opções de Edição para Séries (Fase 4e)
+  const [showEditOptionsModal, setShowEditOptionsModal] = useState<boolean>(false);
+
   const isEditing = Boolean(transactionToEdit);
+  const isRecurringTx = Boolean(
+    isEditing &&
+    transactionToEdit?.recurrence_rule_id !== undefined &&
+    transactionToEdit?.recurrence_rule_id !== null &&
+    String(transactionToEdit.recurrence_rule_id).trim() !== ''
+  );
+  const isInstallmentTx = Boolean(
+    isEditing &&
+    transactionToEdit?.installment_plan_id !== undefined &&
+    transactionToEdit?.installment_plan_id !== null &&
+    String(transactionToEdit.installment_plan_id).trim() !== ''
+  );
+  const isSeriesTx = isRecurringTx || isInstallmentTx;
+
+  const showSeriesBlock = (!isEditing && type !== 'TRANSFERENCIA') || isSeriesTx;
+  const showInstallmentToggle = (!isEditing && type === 'DESPESA') || isInstallmentTx;
+  const showRecurringToggle = (!isEditing && (type === 'DESPESA' || type === 'RECEITA')) || isRecurringTx;
 
   // Lista de contas disponíveis (não arquivadas + conta da transação atual se estiver arquivada)
   const availableAccounts = useMemo(() => {
@@ -162,6 +191,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setShowDeleteConfirm(false);
+      setShowEditOptionsModal(false);
       setFormError(null);
       setIsCreatingCategory(false);
       setIsCreatingSubcategory(false);
@@ -178,15 +208,9 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     }
 
     setFormError(null);
+    setShowDeleteConfirm(false);
+    setShowEditOptionsModal(false);
     setIsCalendarOpen(false);
-    setIsInstallment(false);
-    setIsRecurring(false);
-    setInstallmentsCountStr('2');
-    setRecurrenceInterval(1);
-    setRecurrenceFrequency('MENSAL');
-    setHasEndMonth(false);
-    setEndMonth('');
-    setIsEndMonthPickerOpen(false);
 
     if (transactionToEdit) {
       // Modo Edição: carregar dados existentes
@@ -204,11 +228,72 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
         transactionToEdit.subcategory_id ? String(transactionToEdit.subcategory_id) : ''
       );
       setDateBrl(isoToBrl(transactionToEdit.date || ''));
+
+      // Fase 4e: Ao editar uma transação com recurrence_rule_id
+      if (isRecurringTx) {
+        setIsRecurring(true);
+        setIsInstallment(false);
+        const ruleId = Number(transactionToEdit.recurrence_rule_id);
+        const rule = (data.recurrence_rules || []).find(
+          (r) => Number(r.id) === ruleId
+        );
+        if (rule) {
+          setRecurrenceInterval(rule.frequency_interval || 1);
+          setRecurrenceFrequency(rule.frequency === 'ANUAL' ? 'ANUAL' : 'MENSAL');
+          if (rule.end_month) {
+            setHasEndMonth(true);
+            setEndMonth(rule.end_month);
+          } else {
+            setHasEndMonth(false);
+            setEndMonth('');
+          }
+        } else {
+          setRecurrenceInterval(1);
+          setRecurrenceFrequency('MENSAL');
+          setHasEndMonth(false);
+          setEndMonth('');
+        }
+      } else if (isInstallmentTx) {
+        // Fase 4e: Ao editar uma transação com installment_plan_id
+        setIsInstallment(true);
+        setIsRecurring(false);
+        const planId = Number(transactionToEdit.installment_plan_id);
+        const plan = (data.installment_plans || []).find(
+          (p) => Number(p.id) === planId
+        );
+        if (plan) {
+          setInstallmentsCountStr(String(plan.installments_count || '2'));
+          if (plan.description) {
+            setDescription(plan.description);
+          } else {
+            setDescription(removeInstallmentSuffix(transactionToEdit.description || ''));
+          }
+        } else {
+          setInstallmentsCountStr('2');
+          setDescription(removeInstallmentSuffix(transactionToEdit.description || ''));
+        }
+      } else {
+        // Transação avulsa comum: esconde ambos os toggles
+        setIsInstallment(false);
+        setIsRecurring(false);
+        setInstallmentsCountStr('2');
+        setRecurrenceInterval(1);
+        setRecurrenceFrequency('MENSAL');
+        setHasEndMonth(false);
+        setEndMonth('');
+      }
     } else {
       // Modo Nova Transação: valores padrão
       setType('DESPESA');
       setValueStr('');
       setDescription('');
+      setIsInstallment(false);
+      setIsRecurring(false);
+      setInstallmentsCountStr('2');
+      setRecurrenceInterval(1);
+      setRecurrenceFrequency('MENSAL');
+      setHasEndMonth(false);
+      setEndMonth('');
 
       // Conta padrão: primeira conta disponível
       const firstAcc = availableAccounts[0];
@@ -236,7 +321,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       // Data padrão: hoje em formato brasileiro DD/MM/AAAA
       setDateBrl(getTodayBrl());
     }
-  }, [isOpen, transactionToEdit, availableAccounts, availableCategories, data.subcategories]);
+  }, [isOpen, transactionToEdit, availableAccounts, availableCategories, data.subcategories, data.recurrence_rules, data.installment_plans]);
 
   // Ao trocar o tipo de transação
   const handleTypeSelect = (newType: TxType) => {
@@ -434,8 +519,8 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       return;
     }
 
-    // Validações específicas de parcelamento e recorrência (apenas no modo de criação)
-    if (!isEditing && type === 'DESPESA' && isInstallment) {
+    // Validações específicas de parcelamento e recorrência
+    if ((!isEditing && type === 'DESPESA' && isInstallment) || (isEditing && isInstallmentTx)) {
       const n = parseInt(installmentsCountStr, 10);
       if (isNaN(n) || n < 2) {
         setFormError('Insira um número de parcelas válido maior ou igual a 2.');
@@ -443,7 +528,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       }
     }
 
-    if (!isEditing && (type === 'DESPESA' || type === 'RECEITA') && isRecurring) {
+    if (((!isEditing && (type === 'DESPESA' || type === 'RECEITA')) || (isEditing && isRecurringTx)) && isRecurring) {
       const interval = parseInt(String(recurrenceInterval), 10);
       if (isNaN(interval) || interval < 1) {
         setFormError('O intervalo deve ser um número inteiro maior ou igual a 1.');
@@ -456,6 +541,12 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
           return;
         }
       }
+    }
+
+    // Fase 4e: Ao editar uma transação que faz parte de série, abre o diálogo "Opções de Edição"
+    if (isEditing && isSeriesTx) {
+      setShowEditOptionsModal(true);
+      return;
     }
 
     try {
@@ -511,7 +602,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
           data.transactions
         );
       } else {
-        // === Transação Padrão ou Edição ===
+        // === Transação Padrão ou Edição de Transação Comum ===
         const isEditingTx = Boolean(transactionToEdit?.id);
         const targetNumericId = isEditingTx ? Number(transactionToEdit!.id) : generateNumericId();
         const txPayload: Omit<Transaction, 'id'> & { id?: number } = {
@@ -551,16 +642,197 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     }
   };
 
-  // Exclusão da transação no Firestore
-  const handleDelete = async () => {
+  // Fase 4e: Opções de Edição — "Só esta"
+  const handleSaveSingleOccurrence = async () => {
+    if (!user || !transactionToEdit) return;
+    try {
+      setSaving(true);
+      setFormError(null);
+      const isoDate = brlToIso(dateBrl);
+      if (!isoDate) {
+        setFormError('Informe uma data válida no formato DD/MM/AAAA (ex: 12/09/2026).');
+        return;
+      }
+      const numericValue = parseFloat(valueStr.replace(',', '.'));
+
+      const txPayload: Omit<Transaction, 'id'> & { id?: number } = {
+        id: Number(transactionToEdit.id),
+        account_id: Number(accountId),
+        to_account_id: type === 'TRANSFERENCIA' && toAccountId ? Number(toAccountId) : null,
+        category_id: type !== 'TRANSFERENCIA' && categoryId ? Number(categoryId) : null,
+        subcategory_id: type !== 'TRANSFERENCIA' && subcategoryId ? Number(subcategoryId) : null,
+        type,
+        value: numericValue,
+        description: description.trim(),
+        date: isoDate,
+        ...(transactionToEdit.installment_plan_id != null
+          ? { installment_plan_id: Number(transactionToEdit.installment_plan_id) }
+          : {}),
+        ...(transactionToEdit.installment_number != null
+          ? { installment_number: Number(transactionToEdit.installment_number) }
+          : {}),
+        ...(transactionToEdit.recurrence_rule_id != null
+          ? {
+              recurrence_rule_id: Number(transactionToEdit.recurrence_rule_id),
+              is_recurrence_override: true,
+            }
+          : {
+              is_recurrence_override: transactionToEdit.is_recurrence_override ?? false,
+            }),
+      };
+
+      await saveTransaction(user.uid, txPayload, data.transactions);
+      setShowEditOptionsModal(false);
+      setShowToast(true);
+      onClose();
+    } catch (err: any) {
+      console.error('Erro ao salvar transação única:', err);
+      setFormError(err?.message || 'Erro ao salvar transação.');
+      setShowEditOptionsModal(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Fase 4e: Opções de Edição — "Esta e as futuras"
+  const handleSaveSeriesFuture = async () => {
+    if (!user || !transactionToEdit) return;
+    try {
+      setSaving(true);
+      setFormError(null);
+      const isoDate = brlToIso(dateBrl);
+      if (!isoDate) {
+        setFormError('Informe uma data válida no formato DD/MM/AAAA (ex: 12/09/2026).');
+        return;
+      }
+      const numericValue = parseFloat(valueStr.replace(',', '.'));
+      const usedIds = collectAllExistingNumericIds(data);
+
+      if (isRecurringTx) {
+        const ruleId = Number(transactionToEdit.recurrence_rule_id);
+        const existingRule = data.recurrence_rules.find((r) => Number(r.id) === ruleId);
+        if (!existingRule) {
+          throw new Error('Regra de recorrência correspondente não encontrada.');
+        }
+
+        const fromMonth = isoDate.slice(0, 7);
+        const { updatedRules, updatedTransactions } = updateRecurringSeriesLogic({
+          ruleId,
+          existingRule,
+          fromMonth,
+          formData: {
+            account_id: Number(accountId),
+            category_id: categoryId ? Number(categoryId) : null,
+            subcategory_id: subcategoryId ? Number(subcategoryId) : null,
+            description: description.trim(),
+            value: numericValue,
+            type: type as 'DESPESA' | 'RECEITA',
+            frequency: recurrenceFrequency,
+            frequency_interval: Number(recurrenceInterval),
+            end_month: hasEndMonth && endMonth ? endMonth : null,
+          },
+          currentTransactions: data.transactions,
+          currentRules: data.recurrence_rules,
+          usedIds,
+        });
+
+        await updateRecurringSeries(user.uid, updatedRules, updatedTransactions);
+      } else if (isInstallmentTx) {
+        const planId = Number(transactionToEdit.installment_plan_id);
+        const existingPlan = data.installment_plans.find((p) => Number(p.id) === planId);
+        if (!existingPlan) {
+          throw new Error('Plano de parcelamento correspondente não encontrado.');
+        }
+
+        const finalCount = parseInt(installmentsCountStr, 10);
+        const fromNumber = Number(transactionToEdit.installment_number) || 1;
+
+        const { updatedPlans, updatedTransactions } = updateInstallmentSeriesLogic({
+          planId,
+          existingPlan,
+          fromNumber,
+          formData: {
+            account_id: Number(accountId),
+            category_id: categoryId ? Number(categoryId) : null,
+            subcategory_id: subcategoryId ? Number(subcategoryId) : null,
+            description: description.trim(),
+            value: numericValue,
+            finalCount,
+          },
+          currentTransactions: data.transactions,
+          currentPlans: data.installment_plans,
+          usedIds,
+        });
+
+        await updateInstallmentSeries(user.uid, updatedPlans, updatedTransactions);
+      }
+
+      setShowEditOptionsModal(false);
+      setShowToast(true);
+      onClose();
+    } catch (err: any) {
+      console.error('Erro ao atualizar série:', err);
+      setFormError(err?.message || 'Erro ao atualizar série.');
+      setShowEditOptionsModal(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Exclusão de ocorrência única ("Só esta" ou transação avulsa)
+  const handleDeleteSingle = async () => {
     if (!user || !transactionToEdit?.id) return;
     try {
       setSaving(true);
+      setFormError(null);
       await deleteTransaction(user.uid, Number(transactionToEdit.id), data.transactions);
+      setShowDeleteConfirm(false);
       onClose();
     } catch (err: any) {
       console.error('Erro ao excluir transação no Firestore:', err);
       setFormError(err.message || 'Erro ao excluir transação no Firestore.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Fase 4e: Exclusão de série ("Esta e as futuras")
+  const handleDeleteSeriesFuture = async () => {
+    if (!user || !transactionToEdit) return;
+    try {
+      setSaving(true);
+      setFormError(null);
+
+      if (isRecurringTx) {
+        const ruleId = Number(transactionToEdit.recurrence_rule_id);
+        const txMonth = String(transactionToEdit.date || '').slice(0, 7);
+
+        const { updatedRules, updatedTransactions } = deleteRecurringSeriesLogic({
+          ruleId,
+          fromMonth: txMonth,
+          currentTransactions: data.transactions,
+          currentRules: data.recurrence_rules,
+        });
+
+        await deleteRecurringSeries(user.uid, updatedRules, updatedTransactions);
+      } else if (isInstallmentTx) {
+        const planId = Number(transactionToEdit.installment_plan_id);
+        const fromNumber = Number(transactionToEdit.installment_number) || 1;
+
+        const { updatedTransactions } = deleteInstallmentSeriesLogic({
+          planId,
+          fromNumber,
+          currentTransactions: data.transactions,
+        });
+
+        await deleteInstallmentSeries(user.uid, updatedTransactions);
+      }
+
+      setShowDeleteConfirm(false);
+      onClose();
+    } catch (err: any) {
+      console.error('Erro ao excluir série:', err);
+      setFormError(err?.message || 'Erro ao excluir série.');
     } finally {
       setSaving(false);
     }
@@ -622,10 +894,14 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
             </div>
             <div className="text-center space-y-1.5">
               <h3 className="text-base font-bold text-[#111827] dark:text-[#F5F7F7]">
-                Excluir esta transação?
+                Excluir transação
               </h3>
-              <p className="text-xs text-[#6B7280] dark:text-[#A9B1B1] max-w-xs mx-auto">
-                Esta ação removerá a transação do seu extrato e atualizará o saldo das contas no Firestore. Esta operação não pode ser desfeita.
+              <p className="text-xs text-[#6B7280] dark:text-[#A9B1B1] max-w-sm mx-auto">
+                {isRecurringTx
+                  ? 'Esta transação é recorrente. Deseja excluir apenas esta ocorrência ou desativar a recorrência e excluir todas as ocorrências futuras?'
+                  : isInstallmentTx
+                  ? 'Esta transação é uma parcela. Deseja excluir apenas esta parcela ou excluir esta e todas as parcelas futuras desse plano?'
+                  : 'Esta ação removerá a transação do seu extrato e atualizará o saldo das contas no Firestore. Esta operação não pode ser desfeita.'}
               </p>
             </div>
 
@@ -636,23 +912,115 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
               </div>
             )}
 
-            <div className="flex items-center gap-3 pt-2">
+            {isSeriesTx ? (
+              <div className="space-y-2 pt-2">
+                <button
+                  id="btn-delete-series-future"
+                  type="button"
+                  onClick={handleDeleteSeriesFuture}
+                  disabled={saving}
+                  className="w-full py-2.5 rounded-xl bg-[#EF4444] dark:bg-[#FF4D55] text-white text-xs font-bold shadow-xs hover:opacity-95 active:scale-95 cursor-pointer transition-all flex items-center justify-center gap-1.5"
+                >
+                  {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{saving ? 'Excluindo...' : 'Esta e as futuras'}</span>
+                </button>
+
+                <button
+                  id="btn-delete-series-single"
+                  type="button"
+                  onClick={handleDeleteSingle}
+                  disabled={saving}
+                  className="w-full py-2.5 rounded-xl border border-[#E5E7EB] dark:border-[#222E30] text-xs font-semibold text-[#111827] dark:text-[#F5F7F7] hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                >
+                  Só esta
+                </button>
+
+                <button
+                  id="btn-delete-series-cancel"
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={saving}
+                  className="w-full py-2 text-center text-xs text-[#6B7280] dark:text-[#A9B1B1] hover:underline cursor-pointer transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={saving}
+                  className="flex-1 py-2.5 rounded-xl border border-[#E5E7EB] dark:border-[#222E30] text-xs font-semibold text-[#6B7280] dark:text-[#A9B1B1] hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                >
+                  Voltar
+                </button>
+                <button
+                  id="btn-confirm-delete-tx"
+                  type="button"
+                  onClick={handleDeleteSingle}
+                  disabled={saving}
+                  className="flex-1 py-2.5 rounded-xl bg-[#EF4444] dark:bg-[#FF4D55] text-white text-xs font-bold shadow-xs hover:opacity-95 active:scale-95 cursor-pointer transition-all"
+                >
+                  {saving ? 'Excluindo...' : 'Confirmar Exclusão'}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : showEditOptionsModal ? (
+          /* Diálogo Opções de Edição (Fase 4e) */
+          <div className="p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-[#22A45D]/10 text-[#22A45D] dark:text-[#39D47A] flex items-center justify-center mx-auto">
+              <CheckCircle className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1.5">
+              <h3 className="text-base font-bold text-[#111827] dark:text-[#F5F7F7]">
+                Opções de Edição
+              </h3>
+              <p className="text-xs text-[#6B7280] dark:text-[#A9B1B1] max-w-sm mx-auto">
+                {isRecurringTx
+                  ? 'Esta transação é recorrente. Deseja aplicar as alterações apenas a esta ocorrência ou a esta e todas as ocorrências futuras?'
+                  : 'Esta transação faz parte de um parcelamento. Deseja aplicar as alterações apenas a esta parcela ou a esta e todas as parcelas futuras?'}
+              </p>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-xl bg-[#EF4444]/10 text-[#EF4444] dark:text-[#FF4D55] text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            <div className="space-y-2 pt-2">
               <button
+                id="btn-edit-series-future"
                 type="button"
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={handleSaveSeriesFuture}
                 disabled={saving}
-                className="flex-1 py-2.5 rounded-xl border border-[#E5E7EB] dark:border-[#222E30] text-xs font-semibold text-[#6B7280] dark:text-[#A9B1B1] hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                className="w-full py-2.5 rounded-xl bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] text-xs font-bold shadow-xs hover:opacity-95 active:scale-95 cursor-pointer transition-all flex items-center justify-center gap-1.5"
               >
-                Voltar
+                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{saving ? 'Salvando...' : 'Esta e as futuras'}</span>
               </button>
+
               <button
-                id="btn-confirm-delete-tx"
+                id="btn-edit-series-single"
                 type="button"
-                onClick={handleDelete}
+                onClick={handleSaveSingleOccurrence}
                 disabled={saving}
-                className="flex-1 py-2.5 rounded-xl bg-[#EF4444] dark:bg-[#FF4D55] text-white text-xs font-bold shadow-xs hover:opacity-95 active:scale-95 cursor-pointer transition-all"
+                className="w-full py-2.5 rounded-xl border border-[#E5E7EB] dark:border-[#222E30] text-xs font-semibold text-[#111827] dark:text-[#F5F7F7] hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
               >
-                {saving ? 'Excluindo...' : 'Confirmar Exclusão'}
+                Só esta
+              </button>
+
+              <button
+                id="btn-edit-series-cancel"
+                type="button"
+                onClick={() => setShowEditOptionsModal(false)}
+                disabled={saving}
+                className="w-full py-2 text-center text-xs text-[#6B7280] dark:text-[#A9B1B1] hover:underline cursor-pointer transition-colors"
+              >
+                Cancelar
               </button>
             </div>
           </div>
@@ -1016,14 +1384,14 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
               />
             </div>
 
-            {/* === 6.1. PARCELAMENTO E RECORRÊNCIA (Apenas ao criar e nunca em Transferência) === */}
-            {!isEditing && type !== 'TRANSFERENCIA' && (
+            {/* === 6.1. PARCELAMENTO E RECORRÊNCIA (Criar ou Editar Séries) === */}
+            {showSeriesBlock && (
               <div
                 id="block-installment-recurrence"
                 className="p-3.5 rounded-[12px] bg-[#F9FAFB] dark:bg-[#0D1214] border border-[#E5E7EB] dark:border-[#222E30] space-y-3.5"
               >
-                {/* a) Toggle "Compra parcelada?" (Só aparece quando o tipo é Despesa) */}
-                {type === 'DESPESA' && (
+                {/* a) Toggle "Compra parcelada?" (Só aparece quando o tipo é Despesa ou é edição de parcela) */}
+                {showInstallmentToggle && (
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between gap-3">
                       <div>
@@ -1040,13 +1408,14 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                         role="switch"
                         aria-checked={isInstallment}
                         onClick={() => {
+                          if (isInstallmentTx) return;
                           const next = !isInstallment;
                           setIsInstallment(next);
                           if (next) setIsRecurring(false);
                         }}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                           isInstallment ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
-                        }`}
+                        } ${isInstallmentTx ? 'cursor-default opacity-90' : ''}`}
                       >
                         <span
                           className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
@@ -1076,8 +1445,8 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                           />
                         </div>
 
-                        {/* Texto de prévia em tempo real */}
-                        {installmentPreview && (
+                        {/* Texto de prévia em tempo real (apenas ao criar nova transação) */}
+                        {!isEditing && installmentPreview && (
                           <div
                             id="installment-preview-banner"
                             className="p-2.5 rounded-lg bg-[#22A45D]/10 text-[#22A45D] dark:text-[#39D47A] text-[11px] font-semibold"
@@ -1090,43 +1459,45 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                   </div>
                 )}
 
-                {/* Linha divisória se tipo for Despesa (onde ambos os toggles podem coexistir) */}
-                {type === 'DESPESA' && (
+                {/* Linha divisória se ambos os toggles coexistirem */}
+                {showInstallmentToggle && showRecurringToggle && (
                   <div className="border-t border-[#E5E7EB] dark:border-[#222E30]" />
                 )}
 
-                {/* b) Toggle "É recorrente?" (Aparece para Despesa e Receita) */}
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-bold text-[#111827] dark:text-[#F5F7F7]">
-                        É recorrente?
+                {/* b) Toggle "É recorrente?" (Aparece para Despesa e Receita ao criar, ou na edição de recorrente) */}
+                {showRecurringToggle && (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-[#111827] dark:text-[#F5F7F7]">
+                          É recorrente?
+                        </div>
+                        <div className="text-[11px] text-[#6B7280] dark:text-[#A9B1B1]">
+                          Repetir esta transação mensalmente
+                        </div>
                       </div>
-                      <div className="text-[11px] text-[#6B7280] dark:text-[#A9B1B1]">
-                        Repetir esta transação mensalmente
-                      </div>
+                      <button
+                        id="toggle-recurring"
+                        type="button"
+                        role="switch"
+                        aria-checked={isRecurring}
+                        onClick={() => {
+                          if (isRecurringTx) return;
+                          const next = !isRecurring;
+                          setIsRecurring(next);
+                          if (next) setIsInstallment(false);
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                          isRecurring ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
+                        } ${isRecurringTx ? 'cursor-default opacity-90' : ''}`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                            isRecurring ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
                     </div>
-                    <button
-                      id="toggle-recurring"
-                      type="button"
-                      role="switch"
-                      aria-checked={isRecurring}
-                      onClick={() => {
-                        const next = !isRecurring;
-                        setIsRecurring(next);
-                        if (next) setIsInstallment(false);
-                      }}
-                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                        isRecurring ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                          isRecurring ? 'translate-x-4' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                  </div>
 
                   {isRecurring && (
                     <div className="pt-1.5 space-y-3">
@@ -1249,8 +1620,9 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                     </div>
                   )}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
             {/* UMA única área de mensagem de erro (formError), visível dentro do modal */}
             {formError && (

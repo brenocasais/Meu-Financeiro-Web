@@ -280,6 +280,359 @@ export function generateRecurrenceTransactions(params: {
 }
 
 /**
+ * Remove o sufixo de parcela (ex: " (1/4)" ou " (3/10)") do fim da descrição para manter o texto-base.
+ */
+export function removeInstallmentSuffix(desc: string): string {
+  if (!desc) return '';
+  return desc.replace(/\s*\(\d+\/\d+\)\s*$/, '').trim();
+}
+
+/**
+ * Lógica para "Esta e as futuras" em transações RECORRENTES (Fase 4e):
+ * a) Atualiza a regra mantendo id e start_date;
+ * b) fromMonth = mês da data do formulário;
+ * c) Remove do array transactions com recurrence_rule_id = regra, mês >= fromMonth e is_recurrence_override !== true;
+ * d) Rematerializa na janela (-2 até +36 meses), pulando qualquer mês que já tenha transação dessa regra após o passo c.
+ */
+export function updateRecurringSeriesLogic(params: {
+  ruleId: number;
+  existingRule: RecurrenceRule;
+  fromMonth: string; // YYYY-MM
+  formData: {
+    account_id: number;
+    category_id: number | null;
+    subcategory_id: number | null;
+    description: string;
+    value: number;
+    type: 'DESPESA' | 'RECEITA';
+    frequency: 'MENSAL' | 'ANUAL';
+    frequency_interval: number;
+    end_month: string | null;
+  };
+  currentTransactions: Transaction[];
+  currentRules: RecurrenceRule[];
+  usedIds: Set<number>;
+  nowDate?: Date;
+}): { updatedRules: RecurrenceRule[]; updatedTransactions: Transaction[] } {
+  const {
+    ruleId,
+    existingRule,
+    fromMonth,
+    formData,
+    currentTransactions,
+    currentRules,
+    usedIds,
+    nowDate = new Date(),
+  } = params;
+
+  // a) Atualize a regra, mantendo id e start_date
+  const updatedRule: RecurrenceRule = {
+    ...existingRule,
+    id: ruleId,
+    start_date: existingRule.start_date,
+    account_id: Number(formData.account_id),
+    category_id: formData.category_id != null ? Number(formData.category_id) : null,
+    subcategory_id: formData.subcategory_id != null ? Number(formData.subcategory_id) : null,
+    description: formData.description.trim(),
+    value: Number(formData.value),
+    type: formData.type,
+    frequency: formData.frequency,
+    frequency_interval: Number(formData.frequency_interval),
+    end_month: formData.end_month || null,
+  };
+
+  // c) Remova do array transactions toda transação com recurrence_rule_id = esta regra,
+  //    mês (date.slice(0,7)) >= fromMonth e is_recurrence_override !== true.
+  const keptTransactions: Transaction[] = [];
+  for (const tx of currentTransactions) {
+    if (Number(tx.recurrence_rule_id) === ruleId) {
+      const txMonth = String(tx.date || '').slice(0, 7);
+      if (txMonth >= fromMonth && tx.is_recurrence_override !== true) {
+        continue; // descartar
+      }
+    }
+    keptTransactions.push(tx);
+  }
+
+  // d) Rematerialize com a MESMA função da criação (janela mês atual -2 até +36,
+  //    regras de intervalo/fim, dia de start_date limitado ao fim do mês), mas
+  //    PULANDO qualquer mês que já tenha uma transação dessa regra após o passo (c).
+  const monthsAlreadyPresent = new Set<string>();
+  for (const tx of keptTransactions) {
+    if (Number(tx.recurrence_rule_id) === ruleId) {
+      monthsAlreadyPresent.add(String(tx.date || '').slice(0, 7));
+    }
+  }
+
+  const currentYear = nowDate.getFullYear();
+  const currentMonth = nowDate.getMonth(); // 0 a 11
+
+  const [startYearStr, startMonthStr, startDayStr] = updatedRule.start_date.split('-');
+  const startYear = parseInt(startYearStr, 10);
+  const startMonth = parseInt(startMonthStr, 10); // 1 a 12
+  const startDay = parseInt(startDayStr, 10);
+  const startMonthKey = `${startYearStr}-${startMonthStr}`;
+
+  const newTransactions: Transaction[] = [];
+
+  for (let offset = -2; offset <= 36; offset++) {
+    const targetTotalMonth = currentMonth + offset;
+    const targetYear = currentYear + Math.floor(targetTotalMonth / 12);
+    const targetMonth = (((targetTotalMonth % 12) + 12) % 12) + 1; // 1 a 12
+    const targetMonthKey = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+
+    if (targetMonthKey < startMonthKey) {
+      continue;
+    }
+
+    if (updatedRule.end_month && targetMonthKey > updatedRule.end_month) {
+      continue;
+    }
+
+    const diff = (targetYear - startYear) * 12 + (targetMonth - startMonth);
+    if (diff < 0) {
+      continue;
+    }
+
+    if (updatedRule.frequency === 'MENSAL') {
+      if (diff % updatedRule.frequency_interval !== 0) {
+        continue;
+      }
+    } else if (updatedRule.frequency === 'ANUAL') {
+      if (diff % (updatedRule.frequency_interval * 12) !== 0) {
+        continue;
+      }
+    }
+
+    // Pular se já tem transação desta regra nesse mês
+    if (monthsAlreadyPresent.has(targetMonthKey)) {
+      continue;
+    }
+
+    const lastDayOfMonth = new Date(targetYear, targetMonth, 0).getDate();
+    const day = Math.min(startDay, lastDayOfMonth);
+    const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+    const txId = generateUniqueNumericId(usedIds);
+    newTransactions.push({
+      id: txId,
+      account_id: Number(updatedRule.account_id),
+      to_account_id: null,
+      category_id: updatedRule.category_id != null ? Number(updatedRule.category_id) : null,
+      subcategory_id: updatedRule.subcategory_id != null ? Number(updatedRule.subcategory_id) : null,
+      type: updatedRule.type,
+      value: Number(updatedRule.value),
+      description: updatedRule.description,
+      date: dateStr,
+      installment_plan_id: null,
+      installment_number: null,
+      recurrence_rule_id: updatedRule.id,
+      is_recurrence_override: false,
+    });
+  }
+
+  const updatedTransactions = [...newTransactions, ...keptTransactions];
+  const updatedRules = currentRules.map((r) =>
+    Number(r.id) === ruleId ? updatedRule : r
+  );
+
+  return { updatedRules, updatedTransactions };
+}
+
+/**
+ * Lógica para "Esta e as futuras" em transações PARCELADAS (Fase 4e):
+ * a) Atualiza o plano com finalCount;
+ * b) Apaga parcelas com installment_number > finalCount;
+ * c) Para fromNumber <= installment_number <= finalCount, atualiza valor, conta, categorias e descrição mantendo a data;
+ * d) Se finalCount != currentCount, nas parcelas < fromNumber troca só o sufixo para (${n}/${finalCount});
+ * e) Se finalCount > currentCount, cria parcelas (currentCount+1) até finalCount no dia 10 (YYYY-MM-10).
+ */
+export function updateInstallmentSeriesLogic(params: {
+  planId: number;
+  existingPlan: InstallmentPlan;
+  fromNumber: number;
+  formData: {
+    account_id: number;
+    category_id: number | null;
+    subcategory_id: number | null;
+    description: string;
+    value: number;
+    finalCount: number;
+  };
+  currentTransactions: Transaction[];
+  currentPlans: InstallmentPlan[];
+  usedIds: Set<number>;
+}): { updatedPlans: InstallmentPlan[]; updatedTransactions: Transaction[] } {
+  const {
+    planId,
+    existingPlan,
+    fromNumber,
+    formData,
+    currentTransactions,
+    currentPlans,
+    usedIds,
+  } = params;
+
+  const currentCount = existingPlan.installments_count;
+  const finalCount = Math.max(2, formData.finalCount);
+  const baseDesc = removeInstallmentSuffix(formData.description.trim());
+
+  // a) Atualize o plano (mantendo id, first_installment_month, created_at e total_value)
+  const updatedPlan: InstallmentPlan = {
+    ...existingPlan,
+    id: planId,
+    first_installment_month: existingPlan.first_installment_month,
+    created_at: existingPlan.created_at,
+    total_value: existingPlan.total_value,
+    category_id: formData.category_id != null ? Number(formData.category_id) : null,
+    subcategory_id: formData.subcategory_id != null ? Number(formData.subcategory_id) : null,
+    description: baseDesc,
+    account_id: Number(formData.account_id),
+    installments_count: finalCount,
+  };
+
+  const updatedExistingTransactions: Transaction[] = [];
+
+  for (const tx of currentTransactions) {
+    if (Number(tx.installment_plan_id) === planId) {
+      const n = Number(tx.installment_number);
+
+      // b) Apague as parcelas do plano com installment_number > finalCount
+      if (n > finalCount) {
+        continue;
+      }
+
+      // c) Para as parcelas com fromNumber <= installment_number <= finalCount:
+      if (n >= fromNumber && n <= finalCount) {
+        const newDesc = baseDesc ? `${baseDesc} (${n}/${finalCount})` : `(${n}/${finalCount})`;
+        updatedExistingTransactions.push({
+          ...tx,
+          value: Number(formData.value),
+          category_id: formData.category_id != null ? Number(formData.category_id) : null,
+          subcategory_id: formData.subcategory_id != null ? Number(formData.subcategory_id) : null,
+          account_id: Number(formData.account_id),
+          description: newDesc,
+          // A data de cada parcela NÃO muda!
+        });
+        continue;
+      }
+
+      // d) Se finalCount != currentCount, nas parcelas ANTERIORES a fromNumber troque só o sufixo
+      if (n < fromNumber) {
+        if (finalCount !== currentCount) {
+          const prevBase = removeInstallmentSuffix(tx.description || '');
+          const newDesc = prevBase ? `${prevBase} (${n}/${finalCount})` : `(${n}/${finalCount})`;
+          updatedExistingTransactions.push({
+            ...tx,
+            description: newDesc,
+          });
+        } else {
+          updatedExistingTransactions.push(tx);
+        }
+        continue;
+      }
+    } else {
+      updatedExistingTransactions.push(tx);
+    }
+  }
+
+  // e) Se finalCount > currentCount, crie as parcelas (currentCount+1) até finalCount
+  const createdTransactions: Transaction[] = [];
+  if (finalCount > currentCount) {
+    const [firstYearStr, firstMonthStr] = existingPlan.first_installment_month.split('-');
+    const firstYear = parseInt(firstYearStr, 10);
+    const firstMonth = parseInt(firstMonthStr, 10);
+
+    for (let n = currentCount + 1; n <= finalCount; n++) {
+      const monthOffset = n - 1;
+      const totalMonths = (firstMonth - 1) + monthOffset;
+      const targetYear = firstYear + Math.floor(totalMonths / 12);
+      const targetMonth = ((totalMonths % 12) + 12) % 12 + 1;
+      const dateStr = `${targetYear}-${String(targetMonth).padStart(2, '0')}-10`; // no DIA 10
+
+      const txId = generateUniqueNumericId(usedIds);
+      const newDesc = baseDesc ? `${baseDesc} (${n}/${finalCount})` : `(${n}/${finalCount})`;
+
+      createdTransactions.push({
+        id: txId,
+        account_id: Number(formData.account_id),
+        to_account_id: null,
+        category_id: formData.category_id != null ? Number(formData.category_id) : null,
+        subcategory_id: formData.subcategory_id != null ? Number(formData.subcategory_id) : null,
+        type: 'DESPESA',
+        value: Number(formData.value),
+        description: newDesc,
+        date: dateStr,
+        installment_plan_id: planId,
+        installment_number: n,
+        recurrence_rule_id: null,
+        is_recurrence_override: false,
+      });
+    }
+  }
+
+  const finalTransactions = [...createdTransactions, ...updatedExistingTransactions];
+  const updatedPlans = currentPlans.map((p) =>
+    Number(p.id) === planId ? updatedPlan : p
+  );
+
+  return { updatedPlans, updatedTransactions: finalTransactions };
+}
+
+/**
+ * Exclusão em série de transações RECORRENTES ("Esta e as futuras"):
+ * Marque a regra com active = false e remova as transações dessa regra com mês >= mês da transação e is_recurrence_override !== true.
+ */
+export function deleteRecurringSeriesLogic(params: {
+  ruleId: number;
+  fromMonth: string; // YYYY-MM
+  currentTransactions: Transaction[];
+  currentRules: RecurrenceRule[];
+}): { updatedRules: RecurrenceRule[]; updatedTransactions: Transaction[] } {
+  const { ruleId, fromMonth, currentTransactions, currentRules } = params;
+
+  const updatedRules = currentRules.map((r) =>
+    Number(r.id) === ruleId ? { ...r, active: false } : r
+  );
+
+  const updatedTransactions = currentTransactions.filter((tx) => {
+    if (Number(tx.recurrence_rule_id) === ruleId) {
+      const txMonth = String(tx.date || '').slice(0, 7);
+      if (txMonth >= fromMonth && tx.is_recurrence_override !== true) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return { updatedRules, updatedTransactions };
+}
+
+/**
+ * Exclusão em série de transações PARCELADAS ("Esta e as futuras"):
+ * Remova as transações do plano com installment_number >= o da transação.
+ */
+export function deleteInstallmentSeriesLogic(params: {
+  planId: number;
+  fromNumber: number;
+  currentTransactions: Transaction[];
+}): { updatedTransactions: Transaction[] } {
+  const { planId, fromNumber, currentTransactions } = params;
+
+  const updatedTransactions = currentTransactions.filter((tx) => {
+    if (Number(tx.installment_plan_id) === planId) {
+      const n = Number(tx.installment_number);
+      if (n >= fromNumber) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  return { updatedTransactions };
+}
+
+/**
  * 1. Saldo de conta:
  * Saldo de conta = initial_balance + créditos (RECEITA, TRANSFERENCIA recebida) - débitos (DESPESA, TRANSFERENCIA enviada)
  */

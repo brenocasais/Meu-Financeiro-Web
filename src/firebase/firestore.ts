@@ -25,6 +25,27 @@ export function getUserDocRef(userId: string): DocumentReference {
 }
 
 /**
+ * Sanitiza recursivamente qualquer dado para o Firestore, removendo propriedades com valor undefined,
+ * convertendo undefined para null ou descartando-os, evitando o erro "Unsupported field value: undefined".
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === undefined) return null as any;
+  if (data === null || typeof data !== 'object') return data;
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item)) as any;
+  }
+  const clean: any = {};
+  for (const [key, value] of Object.entries(data as Record<string, any>)) {
+    if (value !== undefined) {
+      clean[key] = sanitizeForFirestore(value);
+    }
+  }
+  return clean;
+}
+
+/**
  * Normaliza os dados brutos do Firestore garantindo que todos os arrays existam
  * e que os IDs sejam estritamente numéricos para total interoperabilidade com o Android.
  */
@@ -52,23 +73,28 @@ export function normalizeUserData(raw: any): UserFirestoreData {
     : [];
 
   const transactions = Array.isArray(raw?.transactions)
-    ? raw.transactions.map((t: any) => ({
-        ...t,
-        id: typeof t.id === 'number' ? t.id : Number(t.id) || t.id,
-        account_id: typeof t.account_id === 'number' ? t.account_id : Number(t.account_id) || t.account_id,
-        to_account_id: t.to_account_id != null ? (typeof t.to_account_id === 'number' ? t.to_account_id : Number(t.to_account_id) || null) : null,
-        category_id: t.category_id != null ? (typeof t.category_id === 'number' ? t.category_id : Number(t.category_id) || null) : null,
-        subcategory_id: t.subcategory_id != null ? (typeof t.subcategory_id === 'number' ? t.subcategory_id : Number(t.subcategory_id) || null) : null,
-        installment_plan_id: t.installment_plan_id != null ? (typeof t.installment_plan_id === 'number' ? t.installment_plan_id : Number(t.installment_plan_id) || null) : null,
-        installment_number: t.installment_number != null ? (typeof t.installment_number === 'number' ? t.installment_number : Number(t.installment_number) || null) : null,
-        recurrence_rule_id: t.recurrence_rule_id != null ? (typeof t.recurrence_rule_id === 'number' ? t.recurrence_rule_id : Number(t.recurrence_rule_id) || null) : null,
-        goal_id: t.goal_id != null ? (typeof t.goal_id === 'number' ? t.goal_id : Number(t.goal_id) || null) : null,
-        is_recurrence_override: typeof t.is_recurrence_override === 'boolean' ? t.is_recurrence_override : undefined,
-        attachment_uri: t.attachment_uri ?? null,
-        attachment_name: t.attachment_name ?? null,
-        attachment_type: t.attachment_type ?? null,
-        synced: typeof t.synced === 'boolean' ? t.synced : undefined,
-      }))
+    ? raw.transactions.map((t: any) => {
+        const item: any = {
+          ...t,
+          id: typeof t.id === 'number' ? t.id : Number(t.id) || t.id,
+          account_id: typeof t.account_id === 'number' ? t.account_id : Number(t.account_id) || t.account_id,
+          to_account_id: t.to_account_id != null ? (typeof t.to_account_id === 'number' ? t.to_account_id : Number(t.to_account_id) || null) : null,
+          category_id: t.category_id != null ? (typeof t.category_id === 'number' ? t.category_id : Number(t.category_id) || null) : null,
+          subcategory_id: t.subcategory_id != null ? (typeof t.subcategory_id === 'number' ? t.subcategory_id : Number(t.subcategory_id) || null) : null,
+          installment_plan_id: t.installment_plan_id != null ? (typeof t.installment_plan_id === 'number' ? t.installment_plan_id : Number(t.installment_plan_id) || null) : null,
+          installment_number: t.installment_number != null ? (typeof t.installment_number === 'number' ? t.installment_number : Number(t.installment_number) || null) : null,
+          recurrence_rule_id: t.recurrence_rule_id != null ? (typeof t.recurrence_rule_id === 'number' ? t.recurrence_rule_id : Number(t.recurrence_rule_id) || null) : null,
+          goal_id: t.goal_id != null ? (typeof t.goal_id === 'number' ? t.goal_id : Number(t.goal_id) || null) : null,
+          is_recurrence_override: Boolean(t.is_recurrence_override ?? false),
+          attachment_uri: t.attachment_uri ?? null,
+          attachment_name: t.attachment_name ?? null,
+          attachment_type: t.attachment_type ?? null,
+        };
+        if (typeof t.synced === 'boolean') {
+          item.synced = t.synced;
+        }
+        return item;
+      })
     : [];
 
   const budget_allocations = Array.isArray(raw?.budget_allocations)
@@ -246,12 +272,14 @@ export async function saveTransaction(
     ? currentTransactions.map((t) => (Number(t.id) === Number(targetId) ? savedTx : t))
     : [savedTx, ...currentTransactions];
 
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
   try {
-    await updateDoc(docRef, { transactions: updatedTransactions });
+    await updateDoc(docRef, { transactions: sanitizedTxs });
   } catch (firstErr: any) {
     console.warn('[Firestore] updateDoc falhou em saveTransaction, tentando setDoc merge...', firstErr);
     try {
-      await setDoc(docRef, { transactions: updatedTransactions }, { merge: true });
+      await setDoc(docRef, { transactions: sanitizedTxs }, { merge: true });
     } catch (fallbackErr: any) {
       console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
       throw new Error(
@@ -278,10 +306,13 @@ export async function createInstallmentPlanWithTransactions(
   const updatedPlans = [...currentPlans, plan];
   const updatedTransactions = [...newTransactions, ...currentTransactions];
 
+  const sanitizedPlans = sanitizeForFirestore(updatedPlans);
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
   try {
     await updateDoc(docRef, {
-      installment_plans: updatedPlans,
-      transactions: updatedTransactions,
+      installment_plans: sanitizedPlans,
+      transactions: sanitizedTxs,
     });
   } catch (firstErr: any) {
     console.warn('[Firestore] updateDoc falhou em createInstallmentPlanWithTransactions, tentando setDoc merge...', firstErr);
@@ -289,8 +320,8 @@ export async function createInstallmentPlanWithTransactions(
       await setDoc(
         docRef,
         {
-          installment_plans: updatedPlans,
-          transactions: updatedTransactions,
+          installment_plans: sanitizedPlans,
+          transactions: sanitizedTxs,
         },
         { merge: true }
       );
@@ -320,10 +351,13 @@ export async function createRecurrenceRuleWithTransactions(
   const updatedRules = [...currentRules, rule];
   const updatedTransactions = [...newTransactions, ...currentTransactions];
 
+  const sanitizedRules = sanitizeForFirestore(updatedRules);
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
   try {
     await updateDoc(docRef, {
-      recurrence_rules: updatedRules,
-      transactions: updatedTransactions,
+      recurrence_rules: sanitizedRules,
+      transactions: sanitizedTxs,
     });
   } catch (firstErr: any) {
     console.warn('[Firestore] updateDoc falhou em createRecurrenceRuleWithTransactions, tentando setDoc merge...', firstErr);
@@ -331,8 +365,8 @@ export async function createRecurrenceRuleWithTransactions(
       await setDoc(
         docRef,
         {
-          recurrence_rules: updatedRules,
-          transactions: updatedTransactions,
+          recurrence_rules: sanitizedRules,
+          transactions: sanitizedTxs,
         },
         { merge: true }
       );
@@ -348,6 +382,154 @@ export async function createRecurrenceRuleWithTransactions(
 }
 
 /**
+ * Atualiza a regra de recorrência e suas transações em lote numa ÚNICA chamada atômica updateDoc (Fase 4e):
+ * updateDoc(docRef, { recurrence_rules: updatedRules, transactions: updatedTransactions })
+ */
+export async function updateRecurringSeries(
+  userId: string,
+  updatedRules: RecurrenceRule[],
+  updatedTransactions: Transaction[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedRules = sanitizeForFirestore(updatedRules);
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
+  try {
+    await updateDoc(docRef, {
+      recurrence_rules: sanitizedRules,
+      transactions: sanitizedTxs,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em updateRecurringSeries, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          recurrence_rules: sanitizedRules,
+          transactions: sanitizedTxs,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao atualizar série recorrente: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+}
+
+/**
+ * Atualiza o plano de parcelamento e suas transações em lote numa ÚNICA chamada atômica updateDoc (Fase 4e):
+ * updateDoc(docRef, { installment_plans: updatedPlans, transactions: updatedTransactions })
+ */
+export async function updateInstallmentSeries(
+  userId: string,
+  updatedPlans: InstallmentPlan[],
+  updatedTransactions: Transaction[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedPlans = sanitizeForFirestore(updatedPlans);
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
+  try {
+    await updateDoc(docRef, {
+      installment_plans: sanitizedPlans,
+      transactions: sanitizedTxs,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em updateInstallmentSeries, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          installment_plans: sanitizedPlans,
+          transactions: sanitizedTxs,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao atualizar parcelamento em série: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+}
+
+/**
+ * Exclui série recorrente a partir da transação selecionada numa ÚNICA chamada atômica updateDoc (Fase 4e):
+ * updateDoc(docRef, { recurrence_rules: updatedRules, transactions: updatedTransactions })
+ */
+export async function deleteRecurringSeries(
+  userId: string,
+  updatedRules: RecurrenceRule[],
+  updatedTransactions: Transaction[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedRules = sanitizeForFirestore(updatedRules);
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
+  try {
+    await updateDoc(docRef, {
+      recurrence_rules: sanitizedRules,
+      transactions: sanitizedTxs,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em deleteRecurringSeries, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          recurrence_rules: sanitizedRules,
+          transactions: sanitizedTxs,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao excluir série recorrente: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+}
+
+/**
+ * Exclui parcelas da série a partir da selecionada numa ÚNICA chamada atômica updateDoc (Fase 4e):
+ * updateDoc(docRef, { transactions: updatedTransactions })
+ */
+export async function deleteInstallmentSeries(
+  userId: string,
+  updatedTransactions: Transaction[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
+  try {
+    await updateDoc(docRef, {
+      transactions: sanitizedTxs,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em deleteInstallmentSeries, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          transactions: sanitizedTxs,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao excluir parcelas em série: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+}
+
+/**
  * Exclui uma transação do array `transactions` do documento /users/{userId}.
  */
 export async function deleteTransaction(
@@ -359,10 +541,12 @@ export async function deleteTransaction(
   const updatedTransactions = currentTransactions.filter(
     (t) => Number(t.id) !== Number(transactionId)
   );
+  const sanitizedTxs = sanitizeForFirestore(updatedTransactions);
+
   try {
-    await updateDoc(docRef, { transactions: updatedTransactions });
+    await updateDoc(docRef, { transactions: sanitizedTxs });
   } catch {
-    await setDoc(docRef, { transactions: updatedTransactions }, { merge: true });
+    await setDoc(docRef, { transactions: sanitizedTxs }, { merge: true });
   }
 }
 
