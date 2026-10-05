@@ -1,6 +1,6 @@
 import { doc, onSnapshot, getDoc, setDoc, updateDoc, arrayUnion, DocumentReference, Unsubscribe } from 'firebase/firestore';
 import { db } from './config';
-import { UserFirestoreData, Transaction, Category, Subcategory } from '../types/finance';
+import { UserFirestoreData, Transaction, Category, Subcategory, InstallmentPlan, RecurrenceRule } from '../types/finance';
 import { generateNumericId } from '../lib/financeLogic';
 
 /**
@@ -17,6 +17,7 @@ import { generateNumericId } from '../lib/financeLogic';
  * - allocation_movements: AllocationMovement[]
  * - goals: Goal[]
  * - installment_plans: InstallmentPlan[]
+ * - recurrence_rules: RecurrenceRule[]
  */
 
 export function getUserDocRef(userId: string): DocumentReference {
@@ -59,7 +60,14 @@ export function normalizeUserData(raw: any): UserFirestoreData {
         category_id: t.category_id != null ? (typeof t.category_id === 'number' ? t.category_id : Number(t.category_id) || null) : null,
         subcategory_id: t.subcategory_id != null ? (typeof t.subcategory_id === 'number' ? t.subcategory_id : Number(t.subcategory_id) || null) : null,
         installment_plan_id: t.installment_plan_id != null ? (typeof t.installment_plan_id === 'number' ? t.installment_plan_id : Number(t.installment_plan_id) || null) : null,
+        installment_number: t.installment_number != null ? (typeof t.installment_number === 'number' ? t.installment_number : Number(t.installment_number) || null) : null,
         recurrence_rule_id: t.recurrence_rule_id != null ? (typeof t.recurrence_rule_id === 'number' ? t.recurrence_rule_id : Number(t.recurrence_rule_id) || null) : null,
+        goal_id: t.goal_id != null ? (typeof t.goal_id === 'number' ? t.goal_id : Number(t.goal_id) || null) : null,
+        is_recurrence_override: typeof t.is_recurrence_override === 'boolean' ? t.is_recurrence_override : undefined,
+        attachment_uri: t.attachment_uri ?? null,
+        attachment_name: t.attachment_name ?? null,
+        attachment_type: t.attachment_type ?? null,
+        synced: typeof t.synced === 'boolean' ? t.synced : undefined,
       }))
     : [];
 
@@ -97,6 +105,25 @@ export function normalizeUserData(raw: any): UserFirestoreData {
         account_id: typeof p.account_id === 'number' ? p.account_id : Number(p.account_id) || p.account_id,
         category_id: p.category_id != null ? (typeof p.category_id === 'number' ? p.category_id : Number(p.category_id) || null) : null,
         subcategory_id: p.subcategory_id != null ? (typeof p.subcategory_id === 'number' ? p.subcategory_id : Number(p.subcategory_id) || null) : null,
+        created_at: typeof p.created_at === 'number' ? p.created_at : Number(p.created_at) || Date.now(),
+      }))
+    : [];
+
+  const recurrence_rules = Array.isArray(raw?.recurrence_rules)
+    ? raw.recurrence_rules.map((r: any) => ({
+        ...r,
+        id: typeof r.id === 'number' ? r.id : Number(r.id) || r.id,
+        account_id: typeof r.account_id === 'number' ? r.account_id : Number(r.account_id) || r.account_id,
+        category_id: r.category_id != null ? (typeof r.category_id === 'number' ? r.category_id : Number(r.category_id) || null) : null,
+        subcategory_id: r.subcategory_id != null ? (typeof r.subcategory_id === 'number' ? r.subcategory_id : Number(r.subcategory_id) || null) : null,
+        description: String(r.description || ''),
+        value: typeof r.value === 'number' ? r.value : Number(r.value) || 0,
+        type: r.type === 'RECEITA' ? 'RECEITA' : 'DESPESA',
+        frequency: r.frequency === 'ANUAL' ? 'ANUAL' : 'MENSAL',
+        frequency_interval: typeof r.frequency_interval === 'number' ? r.frequency_interval : Number(r.frequency_interval) || 1,
+        start_date: String(r.start_date || ''),
+        end_month: r.end_month ?? null,
+        active: Boolean(r.active ?? true),
       }))
     : [];
 
@@ -109,6 +136,7 @@ export function normalizeUserData(raw: any): UserFirestoreData {
     allocation_movements,
     goals,
     installment_plans,
+    recurrence_rules,
   };
 }
 
@@ -165,24 +193,54 @@ export async function saveTransaction(
   const docRef = getUserDocRef(userId);
   const targetId: number = tx.id ? Number(tx.id) : generateNumericId();
 
-  // Objeto completo com todos os IDs estritamente tipados como NUMBER
-  const savedTx: Transaction = {
-    id: targetId,
-    account_id: Number(tx.account_id),
-    to_account_id: tx.type === 'TRANSFERENCIA' && tx.to_account_id != null ? Number(tx.to_account_id) : null,
-    category_id: tx.type !== 'TRANSFERENCIA' && tx.category_id != null ? Number(tx.category_id) : null,
-    subcategory_id: tx.type !== 'TRANSFERENCIA' && tx.subcategory_id != null ? Number(tx.subcategory_id) : null,
-    type: tx.type,
-    value: Number(tx.value),
-    description: String(tx.description || '').trim(),
-    date: String(tx.date),
-    ...(tx.installment_plan_id != null ? { installment_plan_id: Number(tx.installment_plan_id) } : {}),
-    ...(tx.installment_number != null ? { installment_number: Number(tx.installment_number) } : {}),
-    ...(tx.recurrence_rule_id != null ? { recurrence_rule_id: Number(tx.recurrence_rule_id) } : {}),
-  };
+  // Procura transação original existente para não perder nenhum campo não gerenciado pelo formulário web (ex: anexos, metas, overrides)
+  const originalTx = currentTransactions.find((t) => Number(t.id) === Number(targetId));
+  const isEditing = Boolean(originalTx);
 
-  // Determina se é edição checando se o targetId realmente já existe na lista atual
-  const isEditing = currentTransactions.some((t) => Number(t.id) === Number(targetId));
+  let savedTx: Transaction;
+
+  if (isEditing && originalTx) {
+    // Ao EDITAR: parte da transação original completa e sobrescreve apenas os campos alterados
+    const isRecurring = Boolean(originalTx.recurrence_rule_id != null || tx.recurrence_rule_id != null);
+    savedTx = {
+      ...originalTx,
+      id: targetId,
+      account_id: Number(tx.account_id),
+      to_account_id: tx.type === 'TRANSFERENCIA' && tx.to_account_id != null ? Number(tx.to_account_id) : null,
+      category_id: tx.type !== 'TRANSFERENCIA' && tx.category_id != null ? Number(tx.category_id) : null,
+      subcategory_id: tx.type !== 'TRANSFERENCIA' && tx.subcategory_id != null ? Number(tx.subcategory_id) : null,
+      type: tx.type,
+      value: Number(tx.value),
+      description: String(tx.description || '').trim(),
+      date: String(tx.date),
+      is_recurrence_override: isRecurring ? true : (originalTx.is_recurrence_override ?? false),
+      ...(tx.installment_plan_id !== undefined ? { installment_plan_id: tx.installment_plan_id != null ? Number(tx.installment_plan_id) : null } : {}),
+      ...(tx.installment_number !== undefined ? { installment_number: tx.installment_number != null ? Number(tx.installment_number) : null } : {}),
+      ...(tx.recurrence_rule_id !== undefined ? { recurrence_rule_id: tx.recurrence_rule_id != null ? Number(tx.recurrence_rule_id) : null } : {}),
+    };
+  } else {
+    // Nova Transação
+    savedTx = {
+      id: targetId,
+      account_id: Number(tx.account_id),
+      to_account_id: tx.type === 'TRANSFERENCIA' && tx.to_account_id != null ? Number(tx.to_account_id) : null,
+      category_id: tx.type !== 'TRANSFERENCIA' && tx.category_id != null ? Number(tx.category_id) : null,
+      subcategory_id: tx.type !== 'TRANSFERENCIA' && tx.subcategory_id != null ? Number(tx.subcategory_id) : null,
+      type: tx.type,
+      value: Number(tx.value),
+      description: String(tx.description || '').trim(),
+      date: String(tx.date),
+      ...(tx.installment_plan_id != null ? { installment_plan_id: Number(tx.installment_plan_id) } : {}),
+      ...(tx.installment_number != null ? { installment_number: Number(tx.installment_number) } : {}),
+      ...(tx.recurrence_rule_id != null ? { recurrence_rule_id: Number(tx.recurrence_rule_id) } : {}),
+      ...(tx.goal_id != null ? { goal_id: Number(tx.goal_id) } : {}),
+      ...(tx.is_recurrence_override !== undefined ? { is_recurrence_override: tx.is_recurrence_override } : {}),
+      ...(tx.attachment_uri !== undefined ? { attachment_uri: tx.attachment_uri } : {}),
+      ...(tx.attachment_name !== undefined ? { attachment_name: tx.attachment_name } : {}),
+      ...(tx.attachment_type !== undefined ? { attachment_type: tx.attachment_type } : {}),
+      ...(tx.synced !== undefined ? { synced: tx.synced } : {}),
+    };
+  }
 
   const updatedTransactions = isEditing
     ? currentTransactions.map((t) => (Number(t.id) === Number(targetId) ? savedTx : t))
@@ -203,6 +261,90 @@ export async function saveTransaction(
   }
 
   return savedTx;
+}
+
+/**
+ * Cria um InstallmentPlan e suas N transações parceladas numa ÚNICA chamada atômica updateDoc:
+ * updateDoc(docRef, { installment_plans: [...], transactions: [...] })
+ */
+export async function createInstallmentPlanWithTransactions(
+  userId: string,
+  plan: InstallmentPlan,
+  newTransactions: Transaction[],
+  currentPlans: InstallmentPlan[],
+  currentTransactions: Transaction[]
+): Promise<{ plan: InstallmentPlan; transactions: Transaction[] }> {
+  const docRef = getUserDocRef(userId);
+  const updatedPlans = [...currentPlans, plan];
+  const updatedTransactions = [...newTransactions, ...currentTransactions];
+
+  try {
+    await updateDoc(docRef, {
+      installment_plans: updatedPlans,
+      transactions: updatedTransactions,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em createInstallmentPlanWithTransactions, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          installment_plans: updatedPlans,
+          transactions: updatedTransactions,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao salvar parcelamento: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+
+  return { plan, transactions: newTransactions };
+}
+
+/**
+ * Cria uma RecurrenceRule e materializa suas transações na janela de 39 meses numa ÚNICA chamada atômica updateDoc:
+ * updateDoc(docRef, { recurrence_rules: [...], transactions: [...] })
+ */
+export async function createRecurrenceRuleWithTransactions(
+  userId: string,
+  rule: RecurrenceRule,
+  newTransactions: Transaction[],
+  currentRules: RecurrenceRule[],
+  currentTransactions: Transaction[]
+): Promise<{ rule: RecurrenceRule; transactions: Transaction[] }> {
+  const docRef = getUserDocRef(userId);
+  const updatedRules = [...currentRules, rule];
+  const updatedTransactions = [...newTransactions, ...currentTransactions];
+
+  try {
+    await updateDoc(docRef, {
+      recurrence_rules: updatedRules,
+      transactions: updatedTransactions,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em createRecurrenceRuleWithTransactions, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          recurrence_rules: updatedRules,
+          transactions: updatedTransactions,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao salvar regra de recorrência: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+
+  return { rule, transactions: newTransactions };
 }
 
 /**

@@ -7,10 +7,18 @@ import {
   deleteTransaction,
   createCategory,
   createSubcategory,
+  createInstallmentPlanWithTransactions,
+  createRecurrenceRuleWithTransactions,
 } from '../../firebase/firestore';
 import { Transaction } from '../../types/finance';
-import { generateNumericId } from '../../lib/financeLogic';
+import {
+  generateNumericId,
+  generateInstallmentTransactions,
+  generateRecurrenceTransactions,
+  collectAllExistingNumericIds,
+} from '../../lib/financeLogic';
 import { DatePickerCalendar } from '../common/DatePickerCalendar';
+import { MonthYearPicker, MONTH_NAMES_FULL } from '../common/MonthYearPicker';
 
 interface TransactionFormModalProps {
   isOpen: boolean;
@@ -82,9 +90,18 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   // Estados de controle e feedback
   const [saving, setSaving] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [diagnosticStatus, setDiagnosticStatus] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showToast, setShowToast] = useState<boolean>(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
+
+  // Timer para fechar automaticamente o toast discreto em 3 segundos
+  useEffect(() => {
+    if (showToast) {
+      const timer = setTimeout(() => {
+        setShowToast(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [showToast]);
 
   // Estados para modais de criar categoria/subcategoria rápida
   const [isCreatingCategory, setIsCreatingCategory] = useState<boolean>(false);
@@ -95,6 +112,18 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   // Referência para o seletor nativo de calendário e estado do calendário interativo
   const hiddenDateInputRef = useRef<HTMLInputElement>(null);
   const [isCalendarOpen, setIsCalendarOpen] = useState<boolean>(false);
+
+  // Estados para Parcelamento (Fase 4c)
+  const [isInstallment, setIsInstallment] = useState<boolean>(false);
+  const [installmentsCountStr, setInstallmentsCountStr] = useState<string>('2');
+
+  // Estados para Recorrência (Fase 4c)
+  const [isRecurring, setIsRecurring] = useState<boolean>(false);
+  const [recurrenceInterval, setRecurrenceInterval] = useState<number>(1);
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState<'MENSAL' | 'ANUAL'>('MENSAL');
+  const [hasEndMonth, setHasEndMonth] = useState<boolean>(false);
+  const [endMonth, setEndMonth] = useState<string>('');
+  const [isEndMonthPickerOpen, setIsEndMonthPickerOpen] = useState<boolean>(false);
 
   const isEditing = Boolean(transactionToEdit);
 
@@ -134,18 +163,30 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     if (!isOpen) {
       setShowDeleteConfirm(false);
       setFormError(null);
-      setDiagnosticStatus(null);
-      setSuccessMessage(null);
       setIsCreatingCategory(false);
       setIsCreatingSubcategory(false);
       setIsCalendarOpen(false);
+      setIsInstallment(false);
+      setIsRecurring(false);
+      setInstallmentsCountStr('2');
+      setRecurrenceInterval(1);
+      setRecurrenceFrequency('MENSAL');
+      setHasEndMonth(false);
+      setEndMonth('');
+      setIsEndMonthPickerOpen(false);
       return;
     }
 
     setFormError(null);
-    setDiagnosticStatus(null);
-    setSuccessMessage(null);
     setIsCalendarOpen(false);
+    setIsInstallment(false);
+    setIsRecurring(false);
+    setInstallmentsCountStr('2');
+    setRecurrenceInterval(1);
+    setRecurrenceFrequency('MENSAL');
+    setHasEndMonth(false);
+    setEndMonth('');
+    setIsEndMonthPickerOpen(false);
 
     if (transactionToEdit) {
       // Modo Edição: carregar dados existentes
@@ -196,6 +237,61 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       setDateBrl(getTodayBrl());
     }
   }, [isOpen, transactionToEdit, availableAccounts, availableCategories, data.subcategories]);
+
+  // Ao trocar o tipo de transação
+  const handleTypeSelect = (newType: TxType) => {
+    setType(newType);
+    if (newType === 'TRANSFERENCIA') {
+      setIsInstallment(false);
+      setIsRecurring(false);
+    } else if (newType === 'RECEITA') {
+      setIsInstallment(false);
+    }
+  };
+
+  // Texto de prévia em tempo real para parcelamento
+  const installmentPreview = useMemo(() => {
+    if (!isInstallment || type !== 'DESPESA') return null;
+    const n = parseInt(installmentsCountStr, 10);
+    if (isNaN(n) || n < 2) return null;
+
+    const numericVal = parseFloat(valueStr.replace(',', '.'));
+    if (isNaN(numericVal) || numericVal <= 0) return null;
+
+    const iso = brlToIso(dateBrl);
+    if (!iso) return null;
+
+    const totalCents = Math.round(numericVal * 100);
+    const baseCents = Math.floor(totalCents / n);
+    const lastCents = totalCents - baseCents * (n - 1);
+
+    const valBaseStr = (baseCents / 100).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const valLastStr = (lastCents / 100).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    const [baseYearStr, baseMonthStr] = iso.slice(0, 7).split('-');
+    const baseYear = parseInt(baseYearStr, 10);
+    const baseMonth = parseInt(baseMonthStr, 10);
+
+    const startMonthFormatted = `${String(baseMonth).padStart(2, '0')}/${baseYear}`;
+
+    const lastOffset = n - 1;
+    const lastTotalMonth = baseMonth - 1 + lastOffset;
+    const lastYear = baseYear + Math.floor(lastTotalMonth / 12);
+    const lastMonth = (lastTotalMonth % 12) + 1;
+    const endMonthFormatted = `${String(lastMonth).padStart(2, '0')}/${lastYear}`;
+
+    if (baseCents === lastCents) {
+      return `Vai gerar ${n} lançamentos de R$ ${valBaseStr}, de ${startMonthFormatted} a ${endMonthFormatted}.`;
+    } else {
+      return `Vai gerar ${n - 1} lançamentos de R$ ${valBaseStr} e 1 de R$ ${valLastStr}, de ${startMonthFormatted} a ${endMonthFormatted}.`;
+    }
+  }, [isInstallment, type, installmentsCountStr, valueStr, dateBrl]);
 
   // Ao trocar categoria: resetar subcategoria automaticamente para a primeira disponível
   const handleCategoryChange = (newCatId: string) => {
@@ -278,113 +374,178 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     }
   };
 
-  // Registra no console informações do processo de salvamento
-  const logDiagnostic = (msg: string) => {
-    console.log('[TRANSAÇÃO]', msg);
-  };
-
   // Salvar transação no Firestore com validação rigorosa
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setFormError(null);
-    setSuccessMessage(null);
-
-    logDiagnostic('handleSave iniciado');
 
     if (!user) {
-      const err = 'Usuário não autenticado no Firebase.';
-      setFormError(err);
+      setFormError('Usuário não autenticado no Firebase.');
       return;
     }
 
     // 1. Validação de Valor: não permitir vazio ou zero
     const numericValue = parseFloat(valueStr.replace(',', '.'));
     if (isNaN(numericValue) || numericValue <= 0) {
-      const err = 'Informe um valor válido maior que zero.';
-      setFormError(err);
+      setFormError('Informe um valor válido maior que zero.');
       return;
     }
 
     // 2. Validação de Conta
     if (!accountId) {
-      const err = 'Selecione uma conta.';
-      setFormError(err);
+      setFormError('Selecione uma conta.');
       return;
     }
 
     // 3. Validação se Transferência
     if (type === 'TRANSFERENCIA') {
       if (!toAccountId) {
-        const err = 'Selecione a conta de destino.';
-        setFormError(err);
+        setFormError('Selecione a conta de destino.');
         return;
       }
       if (accountId === toAccountId) {
-        const err = 'A conta de origem e a de destino não podem ser iguais.';
-        setFormError(err);
+        setFormError('A conta de origem e a de destino não podem ser iguais.');
         return;
       }
     } else {
       // 4. Validação de Categoria (se não for transferência)
-      if (!categoryId) {
-        const err = 'Selecione uma categoria.';
-        setFormError(err);
-        return;
+      if (!isEditing && isInstallment) {
+        if (!categoryId) {
+          setFormError('Selecione uma categoria para o parcelamento.');
+          return;
+        }
+      } else if (!isEditing && isRecurring) {
+        if (!categoryId) {
+          setFormError('Selecione uma categoria para o lançamento recorrente.');
+          return;
+        }
+      } else {
+        if (!categoryId) {
+          setFormError('Selecione uma categoria.');
+          return;
+        }
       }
     }
 
     // 5. Validação e conversão de Data DD/MM/AAAA -> YYYY-MM-DD
     const isoDate = brlToIso(dateBrl);
     if (!isoDate) {
-      const err = 'Informe uma data válida no formato DD/MM/AAAA (ex: 12/09/2026).';
-      setFormError(err);
+      setFormError('Informe uma data válida no formato DD/MM/AAAA (ex: 12/09/2026).');
       return;
     }
 
-    setDiagnosticStatus('Salvando no Firestore...');
+    // Validações específicas de parcelamento e recorrência (apenas no modo de criação)
+    if (!isEditing && type === 'DESPESA' && isInstallment) {
+      const n = parseInt(installmentsCountStr, 10);
+      if (isNaN(n) || n < 2) {
+        setFormError('Insira um número de parcelas válido maior ou igual a 2.');
+        return;
+      }
+    }
+
+    if (!isEditing && (type === 'DESPESA' || type === 'RECEITA') && isRecurring) {
+      const interval = parseInt(String(recurrenceInterval), 10);
+      if (isNaN(interval) || interval < 1) {
+        setFormError('O intervalo deve ser um número inteiro maior ou igual a 1.');
+        return;
+      }
+      if (hasEndMonth && endMonth) {
+        const startMonth = isoDate.slice(0, 7);
+        if (endMonth < startMonth) {
+          setFormError('O mês de término não pode ser anterior ao mês da data inicial.');
+          return;
+        }
+      }
+    }
 
     try {
       setSaving(true);
 
-      // Objeto da transação com campos solicitados e IDs estritamente numéricos
-      const isEditingTx = Boolean(transactionToEdit?.id);
-      const targetNumericId = isEditingTx ? Number(transactionToEdit!.id) : generateNumericId();
-      const txPayload: Omit<Transaction, 'id'> & { id?: number } = {
-        ...(isEditingTx ? { id: targetNumericId } : {}),
-        account_id: Number(accountId),
-        to_account_id: type === 'TRANSFERENCIA' && toAccountId ? Number(toAccountId) : null,
-        category_id: type !== 'TRANSFERENCIA' && categoryId ? Number(categoryId) : null,
-        subcategory_id: type !== 'TRANSFERENCIA' && subcategoryId ? Number(subcategoryId) : null,
-        type,
-        value: numericValue,
-        description: description.trim(),
-        date: isoDate, // Salvo estritamente como YYYY-MM-DD
-        ...(transactionToEdit?.installment_plan_id != null
-          ? { installment_plan_id: Number(transactionToEdit.installment_plan_id) }
-          : {}),
-        ...(transactionToEdit?.installment_number != null
-          ? { installment_number: Number(transactionToEdit.installment_number) }
-          : {}),
-        ...(transactionToEdit?.recurrence_rule_id != null
-          ? { recurrence_rule_id: Number(transactionToEdit.recurrence_rule_id) }
-          : {}),
-      };
+      if (!isEditing && type === 'DESPESA' && isInstallment) {
+        // === 3. PARCELAMENTO: Criar InstallmentPlan e N transações numa ÚNICA chamada updateDoc atômica ===
+        const n = parseInt(installmentsCountStr, 10);
+        const usedIds = collectAllExistingNumericIds(data);
+        const firstMonth = isoDate.slice(0, 7);
 
-      const savedTx = await saveTransaction(user.uid, txPayload, data.transactions);
+        const { plan, transactions: newTxs } = generateInstallmentTransactions({
+          accountId: Number(accountId),
+          categoryId: Number(categoryId),
+          subcategoryId: subcategoryId ? Number(subcategoryId) : null,
+          description: description.trim(),
+          totalValue: numericValue,
+          installmentsCount: n,
+          firstInstallmentMonth: firstMonth,
+          createdAtMs: Date.now(),
+          usedIds,
+        });
 
-      const successText = `Transação salva com sucesso! (ID: ${savedTx.id})`;
-      logDiagnostic(successText);
-      setDiagnosticStatus(null);
-      setSuccessMessage(successText);
+        await createInstallmentPlanWithTransactions(
+          user.uid,
+          plan,
+          newTxs,
+          data.installment_plans || [],
+          data.transactions
+        );
+      } else if (!isEditing && (type === 'DESPESA' || type === 'RECEITA') && isRecurring) {
+        // === 4. RECORRÊNCIA: Criar RecurrenceRule e materializar transações (39 meses) numa ÚNICA updateDoc ===
+        const usedIds = collectAllExistingNumericIds(data);
+        const { rule, transactions: newTxs } = generateRecurrenceTransactions({
+          accountId: Number(accountId),
+          categoryId: Number(categoryId),
+          subcategoryId: subcategoryId ? Number(subcategoryId) : null,
+          description: description.trim(),
+          value: numericValue,
+          type,
+          frequency: recurrenceFrequency,
+          frequency_interval: Number(recurrenceInterval),
+          startDate: isoDate,
+          endMonth: hasEndMonth && endMonth ? endMonth : null,
+          usedIds,
+        });
 
-      setTimeout(() => {
-        onClose();
-      }, 1000);
+        await createRecurrenceRuleWithTransactions(
+          user.uid,
+          rule,
+          newTxs,
+          data.recurrence_rules || [],
+          data.transactions
+        );
+      } else {
+        // === Transação Padrão ou Edição ===
+        const isEditingTx = Boolean(transactionToEdit?.id);
+        const targetNumericId = isEditingTx ? Number(transactionToEdit!.id) : generateNumericId();
+        const txPayload: Omit<Transaction, 'id'> & { id?: number } = {
+          ...(isEditingTx ? { id: targetNumericId } : {}),
+          account_id: Number(accountId),
+          to_account_id: type === 'TRANSFERENCIA' && toAccountId ? Number(toAccountId) : null,
+          category_id: type !== 'TRANSFERENCIA' && categoryId ? Number(categoryId) : null,
+          subcategory_id: type !== 'TRANSFERENCIA' && subcategoryId ? Number(subcategoryId) : null,
+          type,
+          value: numericValue,
+          description: description.trim(),
+          date: isoDate, // Salvo estritamente como YYYY-MM-DD
+          ...(transactionToEdit?.installment_plan_id != null
+            ? { installment_plan_id: Number(transactionToEdit.installment_plan_id) }
+            : {}),
+          ...(transactionToEdit?.installment_number != null
+            ? { installment_number: Number(transactionToEdit.installment_number) }
+            : {}),
+          ...(transactionToEdit?.recurrence_rule_id != null
+            ? {
+                recurrence_rule_id: Number(transactionToEdit.recurrence_rule_id),
+                is_recurrence_override: true,
+              }
+            : {}),
+        };
+
+        await saveTransaction(user.uid, txPayload, data.transactions);
+      }
+
+      setShowToast(true);
+      onClose();
     } catch (err: any) {
       console.error('Erro ao salvar transação no Firestore:', err);
-      const errMsg = err?.message || 'Erro ao salvar transação no Firestore.';
-      setFormError(errMsg);
-      setDiagnosticStatus(null);
+      setFormError(err?.message || 'Erro ao salvar transação no Firestore.');
     } finally {
       setSaving(false);
     }
@@ -405,72 +566,53 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen && !showToast) return null;
 
   // Valor ISO para o picker nativo
   const currentIsoDate = brlToIso(dateBrl) || new Date().toISOString().substring(0, 10);
 
   return (
-    <div
-      id="modal-transaction-backdrop"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div
-        id="modal-transaction-container"
-        className="w-full max-w-lg rounded-[20px] bg-[#FFFFFF] dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] shadow-xl overflow-hidden my-auto"
-      >
-        {/* Cabeçalho do Modal */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB] dark:border-[#222E30]">
-          <h2 className="text-base font-bold text-[#111827] dark:text-[#F5F7F7]">
-            {isEditing ? 'Editar Transação' : 'Nova Transação'}
-          </h2>
-          <button
-            id="btn-close-transaction-modal"
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-[#6B7280] dark:text-[#A9B1B1] hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* === Notificações e Status no Topo do Modal === */}
-        {(diagnosticStatus || formError || successMessage) && (
-          <div className="px-5 py-2.5 border-b border-[#E5E7EB] dark:border-[#222E30] bg-[#F8FAFC] dark:bg-[#0E1517] space-y-2">
-            {diagnosticStatus && (
-              <div
-                id="diagnostic-status-top"
-                className="p-2.5 rounded-xl bg-[#2563EB]/10 border border-[#2563EB]/30 text-[#2563EB] dark:text-[#60A5FA] text-xs font-semibold flex items-center gap-2"
-              >
-                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                <span>{diagnosticStatus}</span>
-              </div>
-            )}
-
-            {formError && (
-              <div
-                id="diagnostic-error-top"
-                className="p-2.5 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] dark:text-[#FF4D55] text-xs font-semibold flex items-center gap-2"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{formError}</span>
-              </div>
-            )}
-
-            {successMessage && (
-              <div
-                id="diagnostic-success-top"
-                className="p-2.5 rounded-xl bg-[#22A45D]/10 border border-[#22A45D]/30 text-[#22A45D] dark:text-[#39D47A] text-xs font-semibold flex items-center gap-2"
-              >
-                <CheckCircle className="w-4 h-4 shrink-0" />
-                <span>{successMessage}</span>
-              </div>
-            )}
+    <>
+      {/* Toast discreto no canto da tela ao concluir, que some sozinho em 3 segundos */}
+      {showToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-[9999] flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-[#111827] dark:bg-[#1E292B] text-white dark:text-[#F5F7F7] shadow-xl border border-gray-700/30 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3 duration-200 pointer-events-none"
+        >
+          <div className="w-5 h-5 rounded-full bg-[#22A45D]/20 text-[#22A45D] dark:text-[#39D47A] flex items-center justify-center shrink-0">
+            <CheckCircle className="w-3.5 h-3.5" />
           </div>
-        )}
+          <span>Transação salva</span>
+        </div>
+      )}
+
+      {isOpen && (
+        <div
+          id="modal-transaction-backdrop"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
+        >
+          <div
+            id="modal-transaction-container"
+            className="w-full max-w-lg rounded-[20px] bg-[#FFFFFF] dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] shadow-xl overflow-hidden my-auto"
+          >
+            {/* Cabeçalho do Modal */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E7EB] dark:border-[#222E30]">
+              <h2 className="text-base font-bold text-[#111827] dark:text-[#F5F7F7]">
+                {isEditing ? 'Editar Transação' : 'Nova Transação'}
+              </h2>
+              <button
+                id="btn-close-transaction-modal"
+                type="button"
+                onClick={onClose}
+                className="p-1.5 rounded-lg text-[#6B7280] dark:text-[#A9B1B1] hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
         {/* Diálogo de confirmação de exclusão */}
         {showDeleteConfirm ? (
@@ -533,7 +675,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                 <button
                   id="btn-type-despesa"
                   type="button"
-                  onClick={() => setType('DESPESA')}
+                  onClick={() => handleTypeSelect('DESPESA')}
                   className={`py-2 rounded-[10px] text-xs font-bold transition-all cursor-pointer ${
                     type === 'DESPESA'
                       ? 'bg-[#EF4444] dark:bg-[#FF4D55] text-white shadow-xs'
@@ -546,7 +688,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                 <button
                   id="btn-type-receita"
                   type="button"
-                  onClick={() => setType('RECEITA')}
+                  onClick={() => handleTypeSelect('RECEITA')}
                   className={`py-2 rounded-[10px] text-xs font-bold transition-all cursor-pointer ${
                     type === 'RECEITA'
                       ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] shadow-xs'
@@ -559,7 +701,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                 <button
                   id="btn-type-transf"
                   type="button"
-                  onClick={() => setType('TRANSFERENCIA')}
+                  onClick={() => handleTypeSelect('TRANSFERENCIA')}
                   className={`py-2 rounded-[10px] text-xs font-bold transition-all cursor-pointer ${
                     type === 'TRANSFERENCIA'
                       ? 'bg-[#8B5CF6] text-white shadow-xs'
@@ -874,38 +1016,250 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
               />
             </div>
 
-            {/* === Notificações e Status no Rodapé do Formulário === */}
-            {(diagnosticStatus || formError || successMessage) && (
-              <div className="p-3 rounded-xl border border-[#E5E7EB] dark:border-[#222E30] bg-[#F9FAFB] dark:bg-[#131C1E] space-y-2">
-                {diagnosticStatus && (
-                  <div
-                    id="diagnostic-status-bottom"
-                    className="p-2.5 rounded-xl bg-[#2563EB]/10 border border-[#2563EB]/30 text-[#2563EB] dark:text-[#60A5FA] text-xs font-semibold flex items-center gap-2"
-                  >
-                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                    <span>{diagnosticStatus}</span>
+            {/* === 6.1. PARCELAMENTO E RECORRÊNCIA (Apenas ao criar e nunca em Transferência) === */}
+            {!isEditing && type !== 'TRANSFERENCIA' && (
+              <div
+                id="block-installment-recurrence"
+                className="p-3.5 rounded-[12px] bg-[#F9FAFB] dark:bg-[#0D1214] border border-[#E5E7EB] dark:border-[#222E30] space-y-3.5"
+              >
+                {/* a) Toggle "Compra parcelada?" (Só aparece quando o tipo é Despesa) */}
+                {type === 'DESPESA' && (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-[#111827] dark:text-[#F5F7F7]">
+                          Compra parcelada?
+                        </div>
+                        <div className="text-[11px] text-[#6B7280] dark:text-[#A9B1B1]">
+                          Dividir o valor em parcelas mensais
+                        </div>
+                      </div>
+                      <button
+                        id="toggle-installment"
+                        type="button"
+                        role="switch"
+                        aria-checked={isInstallment}
+                        onClick={() => {
+                          const next = !isInstallment;
+                          setIsInstallment(next);
+                          if (next) setIsRecurring(false);
+                        }}
+                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                          isInstallment ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                            isInstallment ? 'translate-x-4' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {isInstallment && (
+                      <div className="pt-1.5 space-y-2">
+                        <div>
+                          <label
+                            htmlFor="input-installments-count"
+                            className="block text-[11px] font-bold uppercase tracking-wider text-[#6B7280] dark:text-[#A9B1B1] mb-1"
+                          >
+                            Número de parcelas
+                          </label>
+                          <input
+                            id="input-installments-count"
+                            type="text"
+                            inputMode="numeric"
+                            value={installmentsCountStr}
+                            onChange={(e) => setInstallmentsCountStr(e.target.value.replace(/\D/g, ''))}
+                            placeholder="Ex: 2"
+                            className="w-full px-3.5 py-2 rounded-xl bg-white dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] text-xs font-bold text-[#111827] dark:text-[#F5F7F7] focus:outline-hidden focus:border-[#22A45D] dark:focus:border-[#39D47A] transition-colors"
+                          />
+                        </div>
+
+                        {/* Texto de prévia em tempo real */}
+                        {installmentPreview && (
+                          <div
+                            id="installment-preview-banner"
+                            className="p-2.5 rounded-lg bg-[#22A45D]/10 text-[#22A45D] dark:text-[#39D47A] text-[11px] font-semibold"
+                          >
+                            {installmentPreview}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {formError && (
-                  <div
-                    id="diagnostic-error-bottom"
-                    className="p-2.5 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] dark:text-[#FF4D55] text-xs font-semibold flex items-center gap-2"
-                  >
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{formError}</span>
-                  </div>
+                {/* Linha divisória se tipo for Despesa (onde ambos os toggles podem coexistir) */}
+                {type === 'DESPESA' && (
+                  <div className="border-t border-[#E5E7EB] dark:border-[#222E30]" />
                 )}
 
-                {successMessage && (
-                  <div
-                    id="diagnostic-success-bottom"
-                    className="p-2.5 rounded-xl bg-[#22A45D]/10 border border-[#22A45D]/30 text-[#22A45D] dark:text-[#39D47A] text-xs font-semibold flex items-center gap-2"
-                  >
-                    <CheckCircle className="w-4 h-4 shrink-0" />
-                    <span>{successMessage}</span>
+                {/* b) Toggle "É recorrente?" (Aparece para Despesa e Receita) */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-bold text-[#111827] dark:text-[#F5F7F7]">
+                        É recorrente?
+                      </div>
+                      <div className="text-[11px] text-[#6B7280] dark:text-[#A9B1B1]">
+                        Repetir esta transação mensalmente
+                      </div>
+                    </div>
+                    <button
+                      id="toggle-recurring"
+                      type="button"
+                      role="switch"
+                      aria-checked={isRecurring}
+                      onClick={() => {
+                        const next = !isRecurring;
+                        setIsRecurring(next);
+                        if (next) setIsInstallment(false);
+                      }}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                        isRecurring ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                          isRecurring ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
                   </div>
-                )}
+
+                  {isRecurring && (
+                    <div className="pt-1.5 space-y-3">
+                      {/* Campo "A cada" + seletor de dois botões MENSAL / ANUAL */}
+                      <div>
+                        <label
+                          htmlFor="input-recurrence-interval"
+                          className="block text-[11px] font-bold uppercase tracking-wider text-[#6B7280] dark:text-[#A9B1B1] mb-1"
+                        >
+                          A cada
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            id="input-recurrence-interval"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={recurrenceInterval}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              setRecurrenceInterval(isNaN(val) ? 1 : val);
+                            }}
+                            className="w-20 px-3 py-2 rounded-xl bg-white dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] text-xs font-bold text-[#111827] dark:text-[#F5F7F7] focus:outline-hidden focus:border-[#22A45D] dark:focus:border-[#39D47A] text-center"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5 flex-1">
+                            <button
+                              id="btn-freq-mensal"
+                              type="button"
+                              onClick={() => setRecurrenceFrequency('MENSAL')}
+                              className={`py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                recurrenceFrequency === 'MENSAL'
+                                  ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] shadow-xs'
+                                  : 'bg-white dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] text-[#6B7280] dark:text-[#A9B1B1] hover:bg-black/5 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              MENSAL
+                            </button>
+                            <button
+                              id="btn-freq-anual"
+                              type="button"
+                              onClick={() => setRecurrenceFrequency('ANUAL')}
+                              className={`py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                recurrenceFrequency === 'ANUAL'
+                                  ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] shadow-xs'
+                                  : 'bg-white dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] text-[#6B7280] dark:text-[#A9B1B1] hover:bg-black/5 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              ANUAL
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Toggle "Definir mês de término?" */}
+                      <div className="pt-1 border-t border-[#E5E7EB] dark:border-[#222E30]/60 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs font-semibold text-[#111827] dark:text-[#F5F7F7]">
+                            Definir mês de término?
+                          </span>
+                          <button
+                            id="toggle-has-end-month"
+                            type="button"
+                            role="switch"
+                            aria-checked={hasEndMonth}
+                            onClick={() => {
+                              const next = !hasEndMonth;
+                              setHasEndMonth(next);
+                              if (next && !endMonth) {
+                                const curIso = brlToIso(dateBrl) || new Date().toISOString().slice(0, 10);
+                                const [y, m] = curIso.slice(0, 7).split('-').map(Number);
+                                setEndMonth(`${y + 1}-${String(m).padStart(2, '0')}`);
+                              }
+                            }}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                              hasEndMonth ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                                hasEndMonth ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+
+                        {hasEndMonth && (
+                          <div>
+                            <label className="block text-[11px] font-bold uppercase tracking-wider text-[#6B7280] dark:text-[#A9B1B1] mb-1">
+                              Terminar em: mês/ano
+                            </label>
+                            <button
+                              id="btn-select-end-month"
+                              type="button"
+                              onClick={() => setIsEndMonthPickerOpen(true)}
+                              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-white dark:bg-[#172021] border border-[#E5E7EB] dark:border-[#222E30] text-xs font-bold text-[#111827] dark:text-[#F5F7F7] hover:border-[#22A45D] dark:hover:border-[#39D47A] transition-colors cursor-pointer"
+                            >
+                              <span>
+                                {endMonth ? (() => {
+                                  const [y, m] = endMonth.split('-');
+                                  const mNum = parseInt(m, 10);
+                                  const name = MONTH_NAMES_FULL[mNum - 1] || m;
+                                  return `${name} de ${y} (${m}/${y})`;
+                                })() : 'Selecione o mês de término...'}
+                              </span>
+                              <Calendar className="w-4 h-4 text-[#22A45D] dark:text-[#39D47A]" />
+                            </button>
+
+                            <MonthYearPicker
+                              isOpen={isEndMonthPickerOpen}
+                              onClose={() => setIsEndMonthPickerOpen(false)}
+                              selectedMonth={endMonth || brlToIso(dateBrl)?.slice(0, 7) || new Date().toISOString().slice(0, 7)}
+                              onChange={(monthStr) => {
+                                setEndMonth(monthStr);
+                                setIsEndMonthPickerOpen(false);
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* UMA única área de mensagem de erro (formError), visível dentro do modal */}
+            {formError && (
+              <div
+                id="form-error-alert"
+                className="p-3 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] dark:text-[#FF4D55] text-xs font-semibold flex items-center gap-2"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{formError}</span>
               </div>
             )}
 
@@ -941,10 +1295,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                   id="btn-save-tx"
                   type="submit"
                   disabled={saving}
-                  onClick={() => {
-                    console.log('[DEBUG] Clique capturado no botão btn-save-tx');
-                  }}
-                  className="px-5 py-2.5 rounded-xl bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] text-xs font-bold shadow-xs hover:opacity-95 active:scale-95 cursor-pointer transition-all disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-5 py-2.5 rounded-xl bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] text-xs font-bold shadow-xs hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition-all flex items-center gap-1.5"
                 >
                   {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   <span>{saving ? 'Salvando...' : 'Salvar'}</span>
@@ -953,7 +1304,9 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
             </div>
           </form>
         )}
-      </div>
-    </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };

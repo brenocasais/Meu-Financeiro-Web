@@ -11,6 +11,7 @@ import {
   AllocationMovement,
   Goal,
   InstallmentPlan,
+  RecurrenceRule,
   ReadyToAssignCalculation,
 } from '../types/finance';
 import {
@@ -51,6 +52,7 @@ interface MonthSummary {
 interface FinanceContextType {
   data: UserFirestoreData;
   installmentPlans: InstallmentPlan[];
+  recurrenceRules: RecurrenceRule[];
   loading: boolean;
   error: string | null;
   selectedMonth: string; // 'YYYY-MM'
@@ -102,6 +104,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     allocation_movements: [],
     goals: [],
     installment_plans: [],
+    recurrence_rules: [],
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +132,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         allocation_movements: [],
         goals: [],
         installment_plans: [],
+        recurrence_rules: [],
       });
       setLoading(false);
       return;
@@ -326,7 +330,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <FinanceContext.Provider
       value={{
         data,
-        installmentPlans: data.installment_plans,
+        installmentPlans: data.installment_plans || [],
+        recurrenceRules: data.recurrence_rules || [],
         loading,
         error,
         selectedMonth,

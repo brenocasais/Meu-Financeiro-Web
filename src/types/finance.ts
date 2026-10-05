@@ -42,6 +42,12 @@ export interface Transaction {
   installment_plan_id?: number | null;
   installment_number?: number | null;
   recurrence_rule_id?: number | null;
+  is_recurrence_override?: boolean;
+  attachment_uri?: string | null;
+  attachment_name?: string | null;
+  attachment_type?: string | null;
+  goal_id?: number | null;
+  synced?: boolean;
 }
 
 export interface InstallmentPlan {
@@ -53,6 +59,22 @@ export interface InstallmentPlan {
   total_value: number;
   installments_count: number;
   first_installment_month: string; // YYYY-MM
+  created_at: number; // timestamp em ms
+}
+
+export interface RecurrenceRule {
+  id: number;
+  account_id: number;
+  category_id: number | null;
+  subcategory_id: number | null;
+  description: string;
+  value: number;
+  type: "DESPESA" | "RECEITA";
+  frequency: "MENSAL" | "ANUAL";
+  frequency_interval: number;
+  start_date: string; // YYYY-MM-DD
+  end_month: string | null; // YYYY-MM
+  active: boolean;
 }
 
 export interface BudgetAllocation {
@@ -96,6 +118,7 @@ export interface UserFirestoreData {
   allocation_movements: AllocationMovement[];
   goals: Goal[];
   installment_plans: InstallmentPlan[];
+  recurrence_rules: RecurrenceRule[];
 }
 
 export interface CategoryMonthCalculation {
