@@ -8,10 +8,9 @@ import { saveBudgetAllocationsAndMovements } from '../../firebase/firestore';
 interface AllocateModalProps {
   isOpen: boolean;
   onClose: () => void;
-  categoryId?: number | null;
+  categoryId: number;
   subcategoryId?: number | null;
-  goalId?: number | null;
-  titlePath: string; // Ex: "Alimentação > Supermercado" ou "Reserva de Emergência"
+  titlePath: string; // Ex: "Alimentação > Supermercado" ou "Alimentação"
   month: string; // "YYYY-MM"
   readyToAssign: number;
   planejadoDoMes: number;
@@ -24,7 +23,6 @@ export const AllocateModal: React.FC<AllocateModalProps> = ({
   onClose,
   categoryId,
   subcategoryId,
-  goalId,
   titlePath,
   month,
   readyToAssign,
@@ -43,8 +41,6 @@ export const AllocateModal: React.FC<AllocateModalProps> = ({
   const [endMonth, setEndMonth] = useState<string>('');
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
-  const isGoal = Boolean(goalId != null);
 
   useEffect(() => {
     if (isOpen) {
@@ -76,13 +72,12 @@ export const AllocateModal: React.FC<AllocateModalProps> = ({
     }
 
     const diff = newTotal - alocadoDoMesSemSobra;
-    if (Math.abs(diff) < 0.0001 && (!isRepeat || isGoal)) {
-      // Sem alteração
+    if (Math.abs(diff) < 0.0001 && !isRepeat) {
       onClose();
       return;
     }
 
-    if (isRepeat && !isGoal && endMode === 'ATE') {
+    if (isRepeat && endMode === 'ATE') {
       if (!endMonth) {
         setError('Informe o mês final para a repetição.');
         return;
@@ -101,13 +96,12 @@ export const AllocateModal: React.FC<AllocateModalProps> = ({
 
       const { updatedAllocations, updatedMovements } = allocateBudgetLogic(
         {
-          categoryId: categoryId != null ? Number(categoryId) : null,
+          categoryId: Number(categoryId),
           subcategoryId: subcategoryId != null ? Number(subcategoryId) : null,
-          goalId: goalId != null ? Number(goalId) : null,
           month,
           newAllocatedTotal: newTotal,
           currentAllocatedInMonth: alocadoDoMesSemSobra,
-          repeat: isRepeat && !isGoal
+          repeat: isRepeat
             ? {
                 interval: Math.max(1, interval),
                 unit,
@@ -221,122 +215,120 @@ export const AllocateModal: React.FC<AllocateModalProps> = ({
           </div>
         </div>
 
-        {/* Bloco Repetir planejamento? (apenas para Envelopes) */}
-        {!isGoal && (
-          <div className="p-3.5 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438] space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold block">Repetir planejamento?</span>
-                <span className="text-[11px] text-[#6B7280] dark:text-[#9FA9AB] block">
-                  Aplicar esta alocação nos meses seguintes
-                </span>
-              </div>
-              <button
-                id="toggle-repeat-allocate"
-                type="button"
-                role="switch"
-                aria-checked={isRepeat}
-                onClick={() => setIsRepeat(!isRepeat)}
-                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                  isRepeat ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                    isRepeat ? 'translate-x-4' : 'translate-x-0'
-                  }`}
-                />
-              </button>
+        {/* Bloco Repetir planejamento? */}
+        <div className="p-3.5 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438] space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold block">Repetir planejamento?</span>
+              <span className="text-[11px] text-[#6B7280] dark:text-[#9FA9AB] block">
+                Aplicar esta alocação nos meses seguintes
+              </span>
             </div>
+            <button
+              id="toggle-repeat-allocate"
+              type="button"
+              role="switch"
+              aria-checked={isRepeat}
+              onClick={() => setIsRepeat(!isRepeat)}
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                isRepeat ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                  isRepeat ? 'translate-x-4' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
 
-            {isRepeat && (
-              <div className="pt-2 border-t border-[#E6E9EC] dark:border-[#283438] space-y-3">
-                {/* Repetir a cada [n] meses/anos */}
-                <div className="space-y-1.5">
-                  <span className="text-[11px] font-semibold text-[#6B7280] dark:text-[#9FA9AB] block">
-                    Repetir a cada
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      value={interval}
-                      onChange={(e) => setInterval(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                      className="w-20 px-3 py-1.5 rounded-lg bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-xs font-bold text-center"
-                    />
-                    <div className="grid grid-cols-2 gap-1 flex-1">
-                      <button
-                        type="button"
-                        onClick={() => setUnit('MESES')}
-                        className={`py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                          unit === 'MESES'
-                            ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214]'
-                            : 'bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-[#6B7280] dark:text-[#9FA9AB]'
-                        }`}
-                      >
-                        Meses
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setUnit('ANOS')}
-                        className={`py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                          unit === 'ANOS'
-                            ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214]'
-                            : 'bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-[#6B7280] dark:text-[#9FA9AB]'
-                        }`}
-                      >
-                        Anos
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Término */}
-                <div className="space-y-1.5">
-                  <span className="text-[11px] font-semibold text-[#6B7280] dark:text-[#9FA9AB] block">
-                    Término
-                  </span>
-                  <div className="grid grid-cols-2 gap-1.5">
+          {isRepeat && (
+            <div className="pt-2 border-t border-[#E6E9EC] dark:border-[#283438] space-y-3">
+              {/* Repetir a cada [n] meses/anos */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-semibold text-[#6B7280] dark:text-[#9FA9AB] block">
+                  Repetir a cada
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={interval}
+                    onChange={(e) => setInterval(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-20 px-3 py-1.5 rounded-lg bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-xs font-bold text-center"
+                  />
+                  <div className="grid grid-cols-2 gap-1 flex-1">
                     <button
                       type="button"
-                      onClick={() => setEndMode('NUNCA')}
+                      onClick={() => setUnit('MESES')}
                       className={`py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                        endMode === 'NUNCA'
+                        unit === 'MESES'
                           ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214]'
                           : 'bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-[#6B7280] dark:text-[#9FA9AB]'
                       }`}
                     >
-                      Nunca (até 2 anos)
+                      Meses
                     </button>
                     <button
                       type="button"
-                      onClick={() => setEndMode('ATE')}
+                      onClick={() => setUnit('ANOS')}
                       className={`py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                        endMode === 'ATE'
+                        unit === 'ANOS'
                           ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214]'
                           : 'bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-[#6B7280] dark:text-[#9FA9AB]'
                       }`}
                     >
-                      Até um mês
+                      Anos
                     </button>
                   </div>
-
-                  {endMode === 'ATE' && (
-                    <div className="pt-1.5">
-                      <input
-                        type="month"
-                        value={endMonth}
-                        onChange={(e) => setEndMonth(e.target.value)}
-                        min={month}
-                        className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-xs font-semibold"
-                      />
-                    </div>
-                  )}
                 </div>
               </div>
-            )}
-          </div>
-        )}
+
+              {/* Término */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-semibold text-[#6B7280] dark:text-[#9FA9AB] block">
+                  Término
+                </span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setEndMode('NUNCA')}
+                    className={`py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                      endMode === 'NUNCA'
+                        ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214]'
+                        : 'bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-[#6B7280] dark:text-[#9FA9AB]'
+                    }`}
+                  >
+                    Nunca (até 2 anos)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEndMode('ATE')}
+                    className={`py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                      endMode === 'ATE'
+                        ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214]'
+                        : 'bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-[#6B7280] dark:text-[#9FA9AB]'
+                    }`}
+                  >
+                    Até um mês
+                  </button>
+                </div>
+
+                {endMode === 'ATE' && (
+                  <div className="pt-1.5">
+                    <input
+                      type="month"
+                      value={endMonth}
+                      onChange={(e) => setEndMonth(e.target.value)}
+                      min={month}
+                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] text-xs font-semibold"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Rodapé */}
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E6E9EC] dark:border-[#283438]">

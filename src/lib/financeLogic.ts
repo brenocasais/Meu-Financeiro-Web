@@ -1413,9 +1413,8 @@ export function planBudgetLogic(
 }
 
 export interface AllocateBudgetParams {
-  categoryId?: number | null;
+  categoryId: number;
   subcategoryId?: number | null;
-  goalId?: number | null;
   month: string;
   newAllocatedTotal: number;
   currentAllocatedInMonth: number;
@@ -1428,10 +1427,10 @@ export interface AllocateBudgetParams {
 }
 
 /**
- * Lógica pura para Alocar Dinheiro (Fase 5b):
+ * Lógica pura para Alocar Dinheiro em Envelopes (Fase 5b):
  * diff = novo - alocado do mês (sem sobra anterior).
- * Se diff > 0, Pronto -> subcategoria/meta.
- * Se diff < 0, subcategoria/meta -> Pronto.
+ * Se diff > 0, Pronto -> envelope.
+ * Se diff < 0, envelope -> Pronto.
  * Se houver repetição, calcula diff em cada mês subsequente e gera movimentos correspondentes.
  */
 export function allocateBudgetLogic(
@@ -1446,35 +1445,7 @@ export function allocateBudgetLogic(
   let updatedAllocations = [...currentAllocations];
   let updatedMovements = [...currentMovements];
 
-  // Caso 1: Meta
-  if (params.goalId != null) {
-    const diff = params.newAllocatedTotal - params.currentAllocatedInMonth;
-    if (Math.abs(diff) > 0.0001) {
-      const res = executeMoveMoneyLogic(
-        {
-          sourceCat: null,
-          sourceSub: null,
-          destCat: null,
-          destSub: null,
-          sourceGoalId: diff < 0 ? Number(params.goalId) : null,
-          destGoalId: diff > 0 ? Number(params.goalId) : null,
-          month: params.month,
-          amount: Math.abs(diff),
-          note: diff > 0 ? 'Aporte na meta' : 'Retirada da meta',
-        },
-        updatedAllocations,
-        updatedMovements,
-        usedIds
-      );
-      return {
-        updatedAllocations: res.updatedAllocations,
-        updatedMovements: res.updatedMovements,
-      };
-    }
-    return { updatedAllocations, updatedMovements };
-  }
-
-  // Caso 2: Envelope
+  // Envelope (categoria / subcategoria)
   if (params.categoryId != null) {
     let monthsList = [params.month];
     if (params.repeat) {

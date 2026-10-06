@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useLayoutEffect } from 'react';
 import {
   Search,
   ChevronDown,
@@ -80,6 +80,705 @@ interface CalculatedGoalsCategory {
   alocado: number;
 }
 
+interface PlanningCategoryCardProps {
+  item: CalculatedCategory;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onToggleCatActionPanel: (e: React.MouseEvent) => void;
+  isCatActionPanelOpen: boolean;
+  activeActionPanel: string | null;
+  onToggleSubActionPanel: (panelId: string, e: React.MouseEvent) => void;
+  displayedSubs: CalculatedSubcategory[];
+  onOpenPlan: (
+    categoryId: number,
+    subcategoryId: number | null,
+    categoryName: string,
+    subcategoryName: string | null,
+    currentPlannedValue: number
+  ) => void;
+  onOpenAllocate: (
+    categoryId: number,
+    subcategoryId: number | null,
+    titlePath: string,
+    planejadoDoMes: number,
+    alocadoDoMesSemSobra: number
+  ) => void;
+  onOpenMove: (categoryId: number, subcategoryId: number | null) => void;
+  onOpenTx: (categoryId: number, subcategoryId: number | null) => void;
+  onQuickAdjust: (params: {
+    categoryId: number;
+    subcategoryId?: number | null;
+    name: string;
+    planejado: number;
+    alocado: number;
+  }) => void;
+  monthAllocationInfo: Map<string, { planned: number; allocated: number }>;
+  maskValue: (val: string) => string;
+}
+
+const PlanningCategoryCard: React.FC<PlanningCategoryCardProps> = ({
+  item,
+  isExpanded,
+  onToggleExpand,
+  onToggleCatActionPanel,
+  isCatActionPanelOpen,
+  activeActionPanel,
+  onToggleSubActionPanel,
+  displayedSubs,
+  onOpenPlan,
+  onOpenAllocate,
+  onOpenMove,
+  onOpenTx,
+  onQuickAdjust,
+  monthAllocationInfo,
+  maskValue,
+}) => {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const lastSubIconRef = useRef<HTMLDivElement>(null);
+  const [lineHeight, setLineHeight] = useState<number>(0);
+
+  const hasVisibleSubs = item.visibleSubs.length > 0;
+
+  useLayoutEffect(() => {
+    if (!isExpanded || !hasVisibleSubs || displayedSubs.length === 0) {
+      setLineHeight(0);
+      return;
+    }
+
+    const calcLine = () => {
+      if (cardRef.current && lastSubIconRef.current) {
+        const cardRect = cardRef.current.getBoundingClientRect();
+        const iconRect = lastSubIconRef.current.getBoundingClientRect();
+        // O centro vertical do ícone da categoria (32px com padding de 10px) fica a 26px do topo do card
+        const iconCenterY = iconRect.top - cardRect.top + iconRect.height / 2;
+        const h = Math.max(0, iconCenterY - 26);
+        setLineHeight(h);
+      }
+    };
+
+    calcLine();
+
+    const ro = new ResizeObserver(() => {
+      calcLine();
+    });
+    if (cardRef.current) {
+      ro.observe(cardRef.current);
+    }
+    return () => ro.disconnect();
+  }, [isExpanded, hasVisibleSubs, displayedSubs.length, activeActionPanel]);
+
+  return (
+    <div
+      ref={cardRef}
+      id={`card-planning-category-${item.cat.id}`}
+      className="rounded-[14px] bg-[#FFFFFF] dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] p-2.5 transition-colors shadow-2xs relative"
+    >
+      {/* Linha vertical contínua que sai do CENTRO VERTICAL do ícone da categoria (top: 26px) e desce até o centro do ícone da ÚLTIMA subcategoria */}
+      {isExpanded && hasVisibleSubs && displayedSubs.length > 0 && lineHeight > 0 && (
+        <div
+          className="absolute left-[26px] top-[26px] w-px border-l border-dashed border-[#E6E9EC] dark:border-[#283438] z-0 pointer-events-none"
+          style={{ height: `${lineHeight}px` }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Linha 1: Ícone + Nome + Disponibilidade + Seta */}
+      <div
+        onClick={(e) => {
+          if (hasVisibleSubs) {
+            onToggleExpand();
+          } else {
+            onToggleCatActionPanel(e);
+          }
+        }}
+        className="flex items-center justify-between gap-2.5 cursor-pointer select-none relative z-10"
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 transition-colors relative z-10 ${
+              item.isRed
+                ? 'bg-[#EF4444]/15 dark:bg-[#FF4D55]/15 text-[#EF4444] dark:text-[#FF4D55]'
+                : 'bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A]'
+            }`}
+          >
+            {item.cat.icon || '📁'}
+          </div>
+
+          <span className="text-[15px] font-semibold text-[#111827] dark:text-[#F5F7F8] truncate">
+            {item.cat.name}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <span
+            className={`text-xs font-semibold ${
+              item.disponivel >= 0
+                ? 'text-[#22A45D] dark:text-[#39D47A]'
+                : 'text-[#EF4444] dark:text-[#FF4D55]'
+            }`}
+          >
+            {item.disponivel >= 0
+              ? `${maskValue(formatCurrencyBRL(item.disponivel))} disponíveis`
+              : `${maskValue(formatCurrencyBRL(Math.abs(item.disponivel)))} acima`}
+          </span>
+
+          {hasVisibleSubs && (
+            <ChevronDown
+              className={`w-4 h-4 text-[#6B7280] dark:text-[#9FA9AB] transition-transform duration-200 ${
+                isExpanded ? 'rotate-180' : 'rotate-0'
+              }`}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Linha 2: Três colunas "Planejado | Alocado | Gasto" e percentual à direita (sem fundo opaco) */}
+      <div className="mt-2 flex items-end justify-between gap-2 relative z-10">
+        <div className="flex items-center gap-4 text-left">
+          <div>
+            <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
+              Planejado
+            </span>
+            <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+              {maskValue(formatCurrencyBRL(item.planejado))}
+            </span>
+          </div>
+
+          <div>
+            <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
+              Alocado
+            </span>
+            <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+              {maskValue(formatCurrencyBRL(item.alocado))}
+            </span>
+          </div>
+
+          <div>
+            <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
+              Gasto
+            </span>
+            <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+              {maskValue(formatCurrencyBRL(item.gasto))}
+            </span>
+          </div>
+        </div>
+
+        <span
+          className="text-[11.5px] font-bold tracking-tight shrink-0"
+          style={{ color: item.barColorHex }}
+        >
+          {item.percent}%
+        </span>
+      </div>
+
+      {/* Linha 3: Barra de 5px, raio 3px, largura total */}
+      <div className="mt-1.5 w-full h-[5px] rounded-[3px] bg-[#EAEAEA] dark:bg-[#202B2E] overflow-hidden relative z-10">
+        <div
+          className="h-full rounded-[3px] transition-all duration-300"
+          style={{
+            width: `${item.alocado > 0 ? Math.min(100, Math.max(0, (item.gasto / item.alocado) * 100)) : 0}%`,
+            backgroundColor: item.barColorHex,
+          }}
+        />
+      </div>
+
+      {/* Painel de ações para categoria SEM subcategorias (5 botões sem símbolos, sem truncar) */}
+      {isCatActionPanelOpen && (
+        <div className="mt-2.5 pt-2 border-t border-[#E6E9EC]/70 dark:border-[#283438]/70 animate-in fade-in duration-150 relative z-10">
+          <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438]">
+            <button
+              type="button"
+              onClick={() =>
+                onOpenPlan(item.cat.id, null, item.cat.name, null, item.planejado)
+              }
+              className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Planejar
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const allocInM = monthAllocationInfo.get(`${item.cat.id}:null`);
+                const alocadoDoMesSemSobra = allocInM ? allocInM.allocated : 0;
+                onOpenAllocate(item.cat.id, null, item.cat.name, item.planejado, alocadoDoMesSemSobra);
+              }}
+              className="py-1.5 px-0.5 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Alocar
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onOpenMove(item.cat.id, null)}
+              className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Mover
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onOpenTx(item.cat.id, null)}
+              className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Transação
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onQuickAdjust({
+                  categoryId: item.cat.id,
+                  subcategoryId: null,
+                  name: item.cat.name,
+                  planejado: item.planejado,
+                  alocado: item.alocado,
+                })
+              }
+              className="py-1.5 px-0.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Ajustar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Subcategorias quando expandida */}
+      {isExpanded && hasVisibleSubs && (
+        <div className="mt-3 relative z-10">
+          {displayedSubs.length === 0 ? (
+            <div className="py-2 text-center text-xs text-[#6B7280] dark:text-[#9FA9AB]">
+              Nenhuma subcategoria.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {displayedSubs.map((subItem, index) => {
+                const isLast = index === displayedSubs.length - 1;
+                const subActionPanelKey = `sub-${subItem.sub.id}`;
+                const isSubActionPanelOpen = activeActionPanel === subActionPanelKey;
+
+                return (
+                  <div
+                    key={subItem.sub.id}
+                    id={`subcat-item-${subItem.sub.id}`}
+                    className="relative pl-7 space-y-1"
+                  >
+                    {/* Ramal horizontal pontilhado ligando o tronco central ao ícone da subcategoria */}
+                    <div
+                      className="absolute left-[16px] top-[12px] w-6 h-px border-b border-dashed border-[#E6E9EC] dark:border-[#283438] pointer-events-none"
+                      aria-hidden="true"
+                    />
+
+                    {/* Tocar na subcategoria abre/fecha o painel de ações */}
+                    <div
+                      onClick={(e) => onToggleSubActionPanel(subActionPanelKey, e)}
+                      className="cursor-pointer select-none rounded-lg hover:bg-black/5 dark:hover:bg-white/5 p-1 -m-1 transition-colors"
+                    >
+                      {/* Sub Linha 1: Ícone + Nome + Disponível */}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div
+                            ref={isLast ? lastSubIconRef : undefined}
+                            className={`w-6 h-6 rounded-md flex items-center justify-center text-xs shrink-0 relative z-10 ${
+                              subItem.isRed
+                                ? 'bg-[#EF4444]/15 dark:bg-[#FF4D55]/15 text-[#EF4444] dark:text-[#FF4D55]'
+                                : 'bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A]'
+                            }`}
+                          >
+                            {subItem.sub.icon || '📄'}
+                          </div>
+                          <span className="text-[13px] font-medium text-[#111827] dark:text-[#F5F7F8] truncate">
+                            {subItem.sub.name}
+                          </span>
+                        </div>
+
+                        <span
+                          className={`text-[11.5px] font-semibold shrink-0 ${
+                            subItem.disponivel >= 0
+                              ? 'text-[#22A45D] dark:text-[#39D47A]'
+                              : 'text-[#EF4444] dark:text-[#FF4D55]'
+                          }`}
+                        >
+                          {subItem.disponivel >= 0
+                            ? `${maskValue(formatCurrencyBRL(subItem.disponivel))} disponíveis`
+                            : `${maskValue(formatCurrencyBRL(Math.abs(subItem.disponivel)))} acima`}
+                        </span>
+                      </div>
+
+                      {/* Sub Linha 2: Planejado | Alocado | Gasto e percentual */}
+                      <div className="flex items-end justify-between gap-2 pl-8">
+                        <div className="flex items-center gap-3.5 text-left">
+                          <div>
+                            <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                              Planejado
+                            </span>
+                            <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                              {maskValue(formatCurrencyBRL(subItem.planejado))}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                              Alocado
+                            </span>
+                            <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                              {maskValue(formatCurrencyBRL(subItem.alocado))}
+                            </span>
+                          </div>
+
+                          <div>
+                            <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                              Gasto
+                            </span>
+                            <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                              {maskValue(formatCurrencyBRL(subItem.gasto))}
+                            </span>
+                          </div>
+                        </div>
+
+                        <span
+                          className="text-[10.5px] font-bold tracking-tight"
+                          style={{ color: subItem.barColorHex }}
+                        >
+                          {subItem.percent}%
+                        </span>
+                      </div>
+
+                      {/* Sub Linha 3: Barra de 5px */}
+                      <div className="pl-8 pt-0.5">
+                        <div className="w-full h-[5px] rounded-[3px] bg-[#EAEAEA] dark:bg-[#202B2E] overflow-hidden">
+                          <div
+                            className="h-full rounded-[3px] transition-all duration-300"
+                            style={{
+                              width: `${subItem.alocado > 0 ? Math.min(100, Math.max(0, (subItem.gasto / subItem.alocado) * 100)) : 0}%`,
+                              backgroundColor: subItem.barColorHex,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Painel de ações da subcategoria (5 botões sem símbolos, sem truncar) */}
+                    {isSubActionPanelOpen && (
+                      <div className="pl-8 pt-1.5 animate-in fade-in duration-150">
+                        <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438]">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPlan(
+                                item.cat.id,
+                                subItem.sub.id,
+                                item.cat.name,
+                                subItem.sub.name,
+                                subItem.planejado
+                              )
+                            }
+                            className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+                          >
+                            Planejar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allocInM = monthAllocationInfo.get(
+                                `${item.cat.id}:${subItem.sub.id}`
+                              );
+                              const alocadoDoMesSemSobra = allocInM ? allocInM.allocated : 0;
+                              onOpenAllocate(
+                                item.cat.id,
+                                subItem.sub.id,
+                                `${item.cat.name} > ${subItem.sub.name}`,
+                                subItem.planejado,
+                                alocadoDoMesSemSobra
+                              );
+                            }}
+                            className="py-1.5 px-0.5 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+                          >
+                            Alocar
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onOpenMove(item.cat.id, subItem.sub.id)}
+                            className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+                          >
+                            Mover
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onOpenTx(item.cat.id, subItem.sub.id)}
+                            className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+                          >
+                            Transação
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onQuickAdjust({
+                                categoryId: item.cat.id,
+                                subcategoryId: subItem.sub.id,
+                                name: subItem.sub.name,
+                                planejado: subItem.planejado,
+                                alocado: subItem.alocado,
+                              })
+                            }
+                            className="py-1.5 px-0.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+                          >
+                            Ajustar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface PlanningGoalsCardProps {
+  calculatedGoalsCategory: CalculatedGoalsCategory;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  activeActionPanel: string | null;
+  onToggleGoalActionPanel: (panelId: string, e: React.MouseEvent) => void;
+  onOpenAportar: (goalId: number) => void;
+  onOpenRetirar: (goalId: number) => void;
+  onQuickAdjust: (params: {
+    goalId: number;
+    name: string;
+    planejado: number;
+    alocado: number;
+  }) => void;
+  maskValue: (val: string) => string;
+}
+
+const PlanningGoalsCard: React.FC<PlanningGoalsCardProps> = ({
+  calculatedGoalsCategory,
+  isExpanded,
+  onToggleExpand,
+  activeActionPanel,
+  onToggleGoalActionPanel,
+  onOpenAportar,
+  onOpenRetirar,
+  onQuickAdjust,
+  maskValue,
+}) => {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const lastGoalIconRef = useRef<HTMLDivElement>(null);
+  const [lineHeight, setLineHeight] = useState<number>(0);
+
+  useLayoutEffect(() => {
+    if (!isExpanded || calculatedGoalsCategory.goals.length === 0) {
+      setLineHeight(0);
+      return;
+    }
+
+    const calcLine = () => {
+      if (cardRef.current && lastGoalIconRef.current) {
+        const cardRect = cardRef.current.getBoundingClientRect();
+        const iconRect = lastGoalIconRef.current.getBoundingClientRect();
+        // O centro vertical do ícone de Metas (32px com padding de 10px) fica a 26px do topo do card
+        const iconCenterY = iconRect.top - cardRect.top + iconRect.height / 2;
+        const h = Math.max(0, iconCenterY - 26);
+        setLineHeight(h);
+      }
+    };
+
+    calcLine();
+
+    const ro = new ResizeObserver(() => {
+      calcLine();
+    });
+    if (cardRef.current) {
+      ro.observe(cardRef.current);
+    }
+    return () => ro.disconnect();
+  }, [isExpanded, calculatedGoalsCategory.goals.length, activeActionPanel]);
+
+  return (
+    <div
+      ref={cardRef}
+      id="card-planning-category-virtual-goals"
+      className="rounded-[14px] bg-[#FFFFFF] dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] p-2.5 transition-colors shadow-2xs relative"
+    >
+      {/* Linha vertical contínua que sai do CENTRO VERTICAL do ícone de Metas 🎯 (top: 26px) e desce até o centro do ícone da ÚLTIMA meta */}
+      {isExpanded && calculatedGoalsCategory.goals.length > 0 && lineHeight > 0 && (
+        <div
+          className="absolute left-[26px] top-[26px] w-px border-l border-dashed border-[#E6E9EC] dark:border-[#283438] z-0 pointer-events-none"
+          style={{ height: `${lineHeight}px` }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Linha 1: Ícone 🎯 + Nome "Metas" + Acumulados + Seta */}
+      <div
+        onClick={onToggleExpand}
+        className="flex items-center justify-between gap-2.5 cursor-pointer select-none relative z-10"
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] flex items-center justify-center text-sm shrink-0 relative z-10">
+            🎯
+          </div>
+
+          <span className="text-[15px] font-semibold text-[#111827] dark:text-[#F5F7F8] truncate">
+            Metas
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs font-semibold text-[#22A45D] dark:text-[#39D47A]">
+            {maskValue(formatCurrencyBRL(calculatedGoalsCategory.alocado))} acumulados
+          </span>
+
+          <ChevronDown
+            className={`w-4 h-4 text-[#6B7280] dark:text-[#9FA9AB] transition-transform duration-200 ${
+              isExpanded ? 'rotate-180' : 'rotate-0'
+            }`}
+          />
+        </div>
+      </div>
+
+      {/* Linha 2: Planejado | Alocado no mês (sem fundo opaco) */}
+      <div className="mt-2 flex items-center gap-4 text-left relative z-10 rounded-sm">
+        <div>
+          <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
+            Planejado
+          </span>
+          <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+            {maskValue(formatCurrencyBRL(calculatedGoalsCategory.planejado))}
+          </span>
+        </div>
+
+        <div>
+          <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
+            Alocado no mês
+          </span>
+          <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+            {maskValue(formatCurrencyBRL(calculatedGoalsCategory.alocado))}
+          </span>
+        </div>
+      </div>
+
+      {/* Lista de Metas Individuais (quando expandida) */}
+      {isExpanded && (
+        <div className="mt-3 relative z-10 space-y-3">
+          {calculatedGoalsCategory.goals.map((g, index) => {
+            const isLast = index === calculatedGoalsCategory.goals.length - 1;
+            const goalActionPanelKey = `goal-${g.goal.id}`;
+            const isGoalActionPanelOpen = activeActionPanel === goalActionPanelKey;
+
+            return (
+              <div
+                key={g.goal.id}
+                id={`virtual-goal-item-${g.goal.id}`}
+                className="relative pl-7 space-y-1"
+              >
+                {/* Ramal horizontal pontilhado */}
+                <div
+                  className="absolute left-[16px] top-[12px] w-6 h-px border-b border-dashed border-[#E6E9EC] dark:border-[#283438] pointer-events-none"
+                  aria-hidden="true"
+                />
+
+                {/* Tocar na meta abre/fecha o painel de ações */}
+                <div
+                  onClick={(e) => onToggleGoalActionPanel(goalActionPanelKey, e)}
+                  className="cursor-pointer select-none rounded-lg hover:bg-black/5 dark:hover:bg-white/5 p-1 -m-1 transition-colors"
+                >
+                  {/* Meta Linha 1 */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div
+                        ref={isLast ? lastGoalIconRef : undefined}
+                        className="w-6 h-6 rounded-md bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] flex items-center justify-center text-xs shrink-0 relative z-10"
+                      >
+                        🎯
+                      </div>
+                      <span className="text-[13px] font-medium text-[#111827] dark:text-[#F5F7F8] truncate">
+                        {g.goal.name}
+                      </span>
+                    </div>
+
+                    <span className="text-[11.5px] font-semibold text-[#22A45D] dark:text-[#39D47A] shrink-0">
+                      {maskValue(formatCurrencyBRL(g.alocado))}
+                    </span>
+                  </div>
+
+                  {/* Meta Linha 2: Planejado | Alocado */}
+                  <div className="flex items-center gap-4 pl-8">
+                    <div>
+                      <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                        Planejado
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                        {maskValue(formatCurrencyBRL(g.planejado))}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                        Alocado no mês
+                      </span>
+                      <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                        {maskValue(formatCurrencyBRL(g.alocado))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Painel de Ações da Meta (3 botões: Aportar, Retirar, Ajustar - sem símbolos) */}
+                {isGoalActionPanelOpen && (
+                  <div className="pl-8 pt-1.5 animate-in fade-in duration-150">
+                    <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438]">
+                      <button
+                        type="button"
+                        onClick={() => onOpenAportar(g.goal.id)}
+                        className="py-1.5 px-1 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold text-[10px] min-[360px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap"
+                      >
+                        Aportar
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => onOpenRetirar(g.goal.id)}
+                        className="py-1.5 px-1 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[360px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap"
+                      >
+                        Retirar
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onQuickAdjust({
+                            goalId: g.goal.id,
+                            name: g.goal.name,
+                            planejado: g.planejado,
+                            alocado: g.alocado,
+                          })
+                        }
+                        className="py-1.5 px-1 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold text-[10px] min-[360px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap"
+                      >
+                        Ajustar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const PlanningScreen: React.FC = () => {
   const { user } = useAuth();
   const { data, loading, selectedMonth, hideValues } = useFinance();
@@ -105,9 +804,8 @@ export const PlanningScreen: React.FC = () => {
 
   const [allocateModalState, setAllocateModalState] = useState<{
     isOpen: boolean;
-    categoryId?: number | null;
+    categoryId: number;
     subcategoryId?: number | null;
-    goalId?: number | null;
     titlePath: string;
     planejadoDoMes: number;
     alocadoDoMesSemSobra: number;
@@ -116,6 +814,12 @@ export const PlanningScreen: React.FC = () => {
   const [distributeModalState, setDistributeModalState] = useState<{
     isOpen: boolean;
     initialSource?: {
+      type: EntityType;
+      categoryId?: number | null;
+      subcategoryId?: number | null;
+      goalId?: number | null;
+    };
+    initialDest?: {
       type: EntityType;
       categoryId?: number | null;
       subcategoryId?: number | null;
@@ -575,7 +1279,7 @@ export const PlanningScreen: React.FC = () => {
           </div>
 
           {/* Divisor vertical */}
-          <div className="w-px h-10 bg-[#E6E9EC] dark:border-[#283438] bg-[#E6E9EC] dark:bg-[#283438]" />
+          <div className="w-px h-10 bg-[#E6E9EC] dark:bg-[#283438]" />
 
           {/* Coluna 2: Sobra do mês anterior */}
           <div className="space-y-0.5 pl-1">
@@ -748,419 +1452,57 @@ export const PlanningScreen: React.FC = () => {
               : item.visibleSubs;
 
             return (
-              <div
+              <PlanningCategoryCard
                 key={item.cat.id}
-                id={`card-planning-category-${item.cat.id}`}
-                className="rounded-[14px] bg-[#FFFFFF] dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] p-2.5 transition-colors shadow-2xs"
-              >
-                {/* Linha 1: Ícone + Nome + Disponibilidade + Seta */}
-                <div
-                  onClick={(e) => {
-                    if (hasVisibleSubs) {
-                      toggleExpand(item.cat.id);
-                    } else {
-                      toggleActionPanel(catActionPanelKey, e);
-                    }
-                  }}
-                  className="flex items-center justify-between gap-2.5 cursor-pointer select-none"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 transition-colors ${
-                        item.isRed
-                          ? 'bg-[#EF4444]/15 dark:bg-[#FF4D55]/15 text-[#EF4444] dark:text-[#FF4D55]'
-                          : 'bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A]'
-                      }`}
-                    >
-                      {item.cat.icon || '📁'}
-                    </div>
-
-                    <span className="text-[15px] font-semibold text-[#111827] dark:text-[#F5F7F8] truncate">
-                      {item.cat.name}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span
-                      className={`text-xs font-semibold ${
-                        item.disponivel >= 0
-                          ? 'text-[#22A45D] dark:text-[#39D47A]'
-                          : 'text-[#EF4444] dark:text-[#FF4D55]'
-                      }`}
-                    >
-                      {item.disponivel >= 0
-                        ? `${maskValue(formatCurrencyBRL(item.disponivel))} disponíveis`
-                        : `${maskValue(formatCurrencyBRL(Math.abs(item.disponivel)))} acima`}
-                    </span>
-
-                    {hasVisibleSubs && (
-                      <ChevronDown
-                        className={`w-4 h-4 text-[#6B7280] dark:text-[#9FA9AB] transition-transform duration-200 ${
-                          isExpanded ? 'rotate-180' : 'rotate-0'
-                        }`}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {/* Linha 2: Três colunas "Planejado | Alocado | Gasto" e percentual à direita */}
-                <div className="mt-2 flex items-end justify-between gap-2">
-                  <div className="flex items-center gap-4 text-left">
-                    <div>
-                      <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
-                        Planejado
-                      </span>
-                      <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                        {maskValue(formatCurrencyBRL(item.planejado))}
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
-                        Alocado
-                      </span>
-                      <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                        {maskValue(formatCurrencyBRL(item.alocado))}
-                      </span>
-                    </div>
-
-                    <div>
-                      <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
-                        Gasto
-                      </span>
-                      <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                        {maskValue(formatCurrencyBRL(item.gasto))}
-                      </span>
-                    </div>
-                  </div>
-
-                  <span
-                    className="text-[11.5px] font-bold tracking-tight shrink-0"
-                    style={{ color: item.barColorHex }}
-                  >
-                    {item.percent}%
-                  </span>
-                </div>
-
-                {/* Linha 3: Barra de 5px, raio 3px, largura total */}
-                <div className="mt-1.5 w-full h-[5px] rounded-[3px] bg-[#EAEAEA] dark:bg-[#202B2E] overflow-hidden">
-                  <div
-                    className="h-full rounded-[3px] transition-all duration-300"
-                    style={{
-                      width: `${item.alocado > 0 ? Math.min(100, Math.max(0, (item.gasto / item.alocado) * 100)) : 0}%`,
-                      backgroundColor: item.barColorHex,
-                    }}
-                  />
-                </div>
-
-                {/* ========================================================= */}
-                {/* PAINEL DE AÇÕES PARA CATEGORIA SEM SUBCATEGORIAS (Fase 5b) */}
-                {/* ========================================================= */}
-                {isCatActionPanelOpen && (
-                  <div className="mt-2.5 pt-2 border-t border-[#E6E9EC]/70 dark:border-[#283438]/70 animate-in fade-in duration-150">
-                    <div className="grid grid-cols-5 gap-1 text-[11px]">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPlanModalState({
-                            isOpen: true,
-                            categoryId: item.cat.id,
-                            subcategoryId: null,
-                            categoryName: item.cat.name,
-                            subcategoryName: null,
-                            currentPlannedValue: item.planejado,
-                          })
-                        }
-                        className="py-1.5 px-1 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-center font-semibold cursor-pointer truncate"
-                      >
-                        Planejar
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const allocInM = monthMaps.allocationInfo.get(`${item.cat.id}:null`);
-                          const alocadoDoMesSemSobra = allocInM ? allocInM.allocated : 0;
-                          setAllocateModalState({
-                            isOpen: true,
-                            categoryId: item.cat.id,
-                            subcategoryId: null,
-                            goalId: null,
-                            titlePath: item.cat.name,
-                            planejadoDoMes: item.planejado,
-                            alocadoDoMesSemSobra,
-                          });
-                        }}
-                        className="py-1.5 px-1 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold cursor-pointer truncate"
-                      >
-                        Alocar
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDistributeModalState({
-                            isOpen: true,
-                            initialSource: {
-                              type: 'ENVELOPE',
-                              categoryId: item.cat.id,
-                              subcategoryId: null,
-                            },
-                          })
-                        }
-                        className="py-1.5 px-1 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-center font-semibold cursor-pointer truncate"
-                      >
-                        Mover
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setTxModalState({
-                            isOpen: true,
-                            categoryId: item.cat.id,
-                            subcategoryId: null,
-                          })
-                        }
-                        className="py-1.5 px-1 rounded-lg bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-center font-semibold cursor-pointer truncate"
-                      >
-                        + Transação
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleQuickAdjust({
-                            categoryId: item.cat.id,
-                            subcategoryId: null,
-                            name: item.cat.name,
-                            planejado: item.planejado,
-                            alocado: item.alocado,
-                          })
-                        }
-                        className="py-1.5 px-1 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold cursor-pointer truncate"
-                      >
-                        Ajustar (⚡)
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ========================================================= */}
-                {/* SUBCATEGORIAS (quando expandida)                         */}
-                {/* ========================================================= */}
-                {isExpanded && hasVisibleSubs && (
-                  <div className="mt-3 pt-2.5 border-t border-[#E6E9EC]/70 dark:border-[#283438]/70">
-                    {displayedSubs.length === 0 ? (
-                      <div className="py-2 text-center text-xs text-[#6B7280] dark:text-[#9FA9AB]">
-                        Nenhuma subcategoria.
-                      </div>
-                    ) : (
-                      <div className="relative pl-4 space-y-3">
-                        <div className="absolute left-[7px] top-1 bottom-4 w-px border-l border-dashed border-[#E6E9EC] dark:border-[#283438]" />
-
-                        {displayedSubs.map((subItem) => {
-                          const subActionPanelKey = `sub-${subItem.sub.id}`;
-                          const isSubActionPanelOpen = activeActionPanel === subActionPanelKey;
-
-                          return (
-                            <div
-                              key={subItem.sub.id}
-                              id={`subcat-item-${subItem.sub.id}`}
-                              className="relative pl-4 space-y-1"
-                            >
-                              <div className="absolute left-[-9px] top-3.5 w-3 h-px border-b border-dashed border-[#E6E9EC] dark:border-[#283438]" />
-
-                              {/* Tocar na subcategoria abre/fecha o painel de ações */}
-                              <div
-                                onClick={(e) => toggleActionPanel(subActionPanelKey, e)}
-                                className="cursor-pointer select-none rounded-lg hover:bg-black/5 dark:hover:bg-white/5 p-1 -m-1 transition-colors"
-                              >
-                                {/* Sub Linha 1: Ícone + Nome + Disponível */}
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <div
-                                      className={`w-6 h-6 rounded-md flex items-center justify-center text-xs shrink-0 ${
-                                        subItem.isRed
-                                          ? 'bg-[#EF4444]/15 dark:bg-[#FF4D55]/15 text-[#EF4444] dark:text-[#FF4D55]'
-                                          : 'bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A]'
-                                      }`}
-                                    >
-                                      {subItem.sub.icon || '📄'}
-                                    </div>
-                                    <span className="text-[13px] font-medium text-[#111827] dark:text-[#F5F7F8] truncate">
-                                      {subItem.sub.name}
-                                    </span>
-                                  </div>
-
-                                  <span
-                                    className={`text-[11.5px] font-semibold shrink-0 ${
-                                      subItem.disponivel >= 0
-                                        ? 'text-[#22A45D] dark:text-[#39D47A]'
-                                        : 'text-[#EF4444] dark:text-[#FF4D55]'
-                                    }`}
-                                  >
-                                    {subItem.disponivel >= 0
-                                      ? `${maskValue(formatCurrencyBRL(subItem.disponivel))} disponíveis`
-                                      : `${maskValue(formatCurrencyBRL(Math.abs(subItem.disponivel)))} acima`}
-                                  </span>
-                                </div>
-
-                                {/* Sub Linha 2: Planejado | Alocado | Gasto e percentual */}
-                                <div className="flex items-end justify-between gap-2 pl-8">
-                                  <div className="flex items-center gap-3.5 text-left">
-                                    <div>
-                                      <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                                        Planejado
-                                      </span>
-                                      <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                                        {maskValue(formatCurrencyBRL(subItem.planejado))}
-                                      </span>
-                                    </div>
-
-                                    <div>
-                                      <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                                        Alocado
-                                      </span>
-                                      <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                                        {maskValue(formatCurrencyBRL(subItem.alocado))}
-                                      </span>
-                                    </div>
-
-                                    <div>
-                                      <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                                        Gasto
-                                      </span>
-                                      <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                                        {maskValue(formatCurrencyBRL(subItem.gasto))}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  <span
-                                    className="text-[10.5px] font-bold tracking-tight"
-                                    style={{ color: subItem.barColorHex }}
-                                  >
-                                    {subItem.percent}%
-                                  </span>
-                                </div>
-
-                                {/* Sub Linha 3: Barra de 5px */}
-                                <div className="pl-8 pt-0.5">
-                                  <div className="w-full h-[5px] rounded-[3px] bg-[#EAEAEA] dark:bg-[#202B2E] overflow-hidden">
-                                    <div
-                                      className="h-full rounded-[3px] transition-all duration-300"
-                                      style={{
-                                        width: `${subItem.alocado > 0 ? Math.min(100, Math.max(0, (subItem.gasto / subItem.alocado) * 100)) : 0}%`,
-                                        backgroundColor: subItem.barColorHex,
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* ========================================================= */}
-                              {/* PAINEL DE AÇÕES DA SUBCATEGORIA (5 BOTÕES) - Fase 5b       */}
-                              {/* ========================================================= */}
-                              {isSubActionPanelOpen && (
-                                <div className="pl-8 pt-1.5 animate-in fade-in duration-150">
-                                  <div className="grid grid-cols-5 gap-1 text-[11px] p-1.5 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438]">
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setPlanModalState({
-                                          isOpen: true,
-                                          categoryId: item.cat.id,
-                                          subcategoryId: subItem.sub.id,
-                                          categoryName: item.cat.name,
-                                          subcategoryName: subItem.sub.name,
-                                          currentPlannedValue: subItem.planejado,
-                                        })
-                                      }
-                                      className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold cursor-pointer truncate"
-                                    >
-                                      Planejar
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const allocInM = monthMaps.allocationInfo.get(
-                                          `${item.cat.id}:${subItem.sub.id}`
-                                        );
-                                        const alocadoDoMesSemSobra = allocInM ? allocInM.allocated : 0;
-                                        setAllocateModalState({
-                                          isOpen: true,
-                                          categoryId: item.cat.id,
-                                          subcategoryId: subItem.sub.id,
-                                          goalId: null,
-                                          titlePath: `${item.cat.name} > ${subItem.sub.name}`,
-                                          planejadoDoMes: subItem.planejado,
-                                          alocadoDoMesSemSobra,
-                                        });
-                                      }}
-                                      className="py-1.5 px-0.5 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold cursor-pointer truncate"
-                                    >
-                                      Alocar
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setDistributeModalState({
-                                          isOpen: true,
-                                          initialSource: {
-                                            type: 'ENVELOPE',
-                                            categoryId: item.cat.id,
-                                            subcategoryId: subItem.sub.id,
-                                          },
-                                        })
-                                      }
-                                      className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold cursor-pointer truncate"
-                                    >
-                                      Mover
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setTxModalState({
-                                          isOpen: true,
-                                          categoryId: item.cat.id,
-                                          subcategoryId: subItem.sub.id,
-                                        })
-                                      }
-                                      className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold cursor-pointer truncate"
-                                    >
-                                      + Transação
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleQuickAdjust({
-                                          categoryId: item.cat.id,
-                                          subcategoryId: subItem.sub.id,
-                                          name: subItem.sub.name,
-                                          planejado: subItem.planejado,
-                                          alocado: subItem.alocado,
-                                        })
-                                      }
-                                      className="py-1.5 px-0.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold cursor-pointer truncate"
-                                    >
-                                      Ajustar (⚡)
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+                item={item}
+                isExpanded={isExpanded}
+                onToggleExpand={() => toggleExpand(item.cat.id)}
+                onToggleCatActionPanel={(e) => toggleActionPanel(catActionPanelKey, e)}
+                isCatActionPanelOpen={isCatActionPanelOpen}
+                activeActionPanel={activeActionPanel}
+                onToggleSubActionPanel={(panelId, e) => toggleActionPanel(panelId, e)}
+                displayedSubs={displayedSubs}
+                onOpenPlan={(categoryId, subcategoryId, categoryName, subcategoryName, currentPlannedValue) => {
+                  setPlanModalState({
+                    isOpen: true,
+                    categoryId,
+                    subcategoryId,
+                    categoryName,
+                    subcategoryName,
+                    currentPlannedValue,
+                  });
+                }}
+                onOpenAllocate={(categoryId, subcategoryId, titlePath, planejadoDoMes, alocadoDoMesSemSobra) => {
+                  setAllocateModalState({
+                    isOpen: true,
+                    categoryId,
+                    subcategoryId,
+                    titlePath,
+                    planejadoDoMes,
+                    alocadoDoMesSemSobra,
+                  });
+                }}
+                onOpenMove={(categoryId, subcategoryId) => {
+                  setDistributeModalState({
+                    isOpen: true,
+                    initialSource: {
+                      type: 'ENVELOPE',
+                      categoryId,
+                      subcategoryId,
+                    },
+                  });
+                }}
+                onOpenTx={(categoryId, subcategoryId) => {
+                  setTxModalState({
+                    isOpen: true,
+                    categoryId,
+                    subcategoryId,
+                  });
+                }}
+                onQuickAdjust={handleQuickAdjust}
+                monthAllocationInfo={monthMaps.allocationInfo}
+                maskValue={maskValue}
+              />
             );
           })}
 
@@ -1168,184 +1510,39 @@ export const PlanningScreen: React.FC = () => {
           {/* 5. LINHA ESPECIAL "METAS 🎯"                                              */}
           {/* ========================================================================= */}
           {showVirtualGoals && calculatedGoalsCategory && (
-            <div
-              id="card-planning-category-virtual-goals"
-              className="rounded-[14px] bg-[#FFFFFF] dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] p-2.5 transition-colors shadow-2xs"
-            >
-              {/* Linha 1: Ícone 🎯 + Nome "Metas" + Acumulados + Seta */}
-              <div
-                onClick={() => toggleExpand('virtual_goals')}
-                className="flex items-center justify-between gap-2.5 cursor-pointer select-none"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] flex items-center justify-center text-sm shrink-0">
-                    🎯
-                  </div>
-
-                  <span className="text-[15px] font-semibold text-[#111827] dark:text-[#F5F7F8] truncate">
-                    Metas
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs font-semibold text-[#22A45D] dark:text-[#39D47A]">
-                    {maskValue(formatCurrencyBRL(calculatedGoalsCategory.alocado))} acumulados
-                  </span>
-
-                  <ChevronDown
-                    className={`w-4 h-4 text-[#6B7280] dark:text-[#9FA9AB] transition-transform duration-200 ${
-                      isSearchActive || expandedCategories.has('virtual_goals')
-                        ? 'rotate-180'
-                        : 'rotate-0'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Linha 2: Planejado | Alocado no mês (sem coluna Gasto, sem percentual e sem barra) */}
-              <div className="mt-2 flex items-center gap-4 text-left">
-                <div>
-                  <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
-                    Planejado
-                  </span>
-                  <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                    {maskValue(formatCurrencyBRL(calculatedGoalsCategory.planejado))}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="block text-[10px] text-[#6B7280] dark:text-[#9FA9AB] font-normal leading-none">
-                    Alocado no mês
-                  </span>
-                  <span className="text-[12px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                    {maskValue(formatCurrencyBRL(calculatedGoalsCategory.alocado))}
-                  </span>
-                </div>
-              </div>
-
-              {/* Lista de Metas Individuais (quando expandida) */}
-              {(isSearchActive || expandedCategories.has('virtual_goals')) && (
-                <div className="mt-3 pt-2.5 border-t border-[#E6E9EC]/70 dark:border-[#283438]/70 relative pl-4 space-y-3">
-                  <div className="absolute left-[7px] top-1 bottom-4 w-px border-l border-dashed border-[#E6E9EC] dark:border-[#283438]" />
-
-                  {calculatedGoalsCategory.goals.map((g) => {
-                    const goalActionPanelKey = `goal-${g.goal.id}`;
-                    const isGoalActionPanelOpen = activeActionPanel === goalActionPanelKey;
-
-                    return (
-                      <div
-                        key={g.goal.id}
-                        id={`virtual-goal-item-${g.goal.id}`}
-                        className="relative pl-4 space-y-1"
-                      >
-                        <div className="absolute left-[-9px] top-3.5 w-3 h-px border-b border-dashed border-[#E6E9EC] dark:border-[#283438]" />
-
-                        {/* Tocar na meta abre/fecha o painel de ações */}
-                        <div
-                          onClick={(e) => toggleActionPanel(goalActionPanelKey, e)}
-                          className="cursor-pointer select-none rounded-lg hover:bg-black/5 dark:hover:bg-white/5 p-1 -m-1 transition-colors"
-                        >
-                          {/* Meta Linha 1 */}
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className="w-6 h-6 rounded-md bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] flex items-center justify-center text-xs shrink-0">
-                                🎯
-                              </div>
-                              <span className="text-[13px] font-medium text-[#111827] dark:text-[#F5F7F8] truncate">
-                                {g.goal.name}
-                              </span>
-                            </div>
-
-                            <span className="text-[11.5px] font-semibold text-[#22A45D] dark:text-[#39D47A] shrink-0">
-                              {maskValue(formatCurrencyBRL(g.alocado))}
-                            </span>
-                          </div>
-
-                          {/* Meta Linha 2: Planejado | Alocado */}
-                          <div className="flex items-center gap-4 pl-8">
-                            <div>
-                              <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                                Planejado
-                              </span>
-                              <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                                {maskValue(formatCurrencyBRL(g.planejado))}
-                              </span>
-                            </div>
-
-                            <div>
-                              <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                                Alocado no mês
-                              </span>
-                              <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                                {maskValue(formatCurrencyBRL(g.alocado))}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* ========================================================= */}
-                        {/* PAINEL DE AÇÕES DA META (3 BOTÕES) - Fase 5b              */}
-                        {/* ========================================================= */}
-                        {isGoalActionPanelOpen && (
-                          <div className="pl-8 pt-1.5 animate-in fade-in duration-150">
-                            <div className="grid grid-cols-3 gap-1.5 text-[11px] p-1.5 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438]">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setAllocateModalState({
-                                    isOpen: true,
-                                    categoryId: null,
-                                    subcategoryId: null,
-                                    goalId: g.goal.id,
-                                    titlePath: g.goal.name,
-                                    planejadoDoMes: g.planejado,
-                                    alocadoDoMesSemSobra: g.alocado,
-                                  })
-                                }
-                                className="py-1.5 px-1 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold cursor-pointer truncate"
-                              >
-                                Alocar (Aportar)
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setDistributeModalState({
-                                    isOpen: true,
-                                    initialSource: {
-                                      type: 'META',
-                                      goalId: g.goal.id,
-                                    },
-                                  })
-                                }
-                                className="py-1.5 px-1 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold cursor-pointer truncate"
-                              >
-                                Mover (Retirar)
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleQuickAdjust({
-                                    goalId: g.goal.id,
-                                    name: g.goal.name,
-                                    planejado: g.planejado,
-                                    alocado: g.alocado,
-                                  })
-                                }
-                                className="py-1.5 px-1 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold cursor-pointer truncate"
-                              >
-                                Ajustar (⚡)
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <PlanningGoalsCard
+              calculatedGoalsCategory={calculatedGoalsCategory}
+              isExpanded={isSearchActive || expandedCategories.has('virtual_goals')}
+              onToggleExpand={() => toggleExpand('virtual_goals')}
+              activeActionPanel={activeActionPanel}
+              onToggleGoalActionPanel={(panelId, e) => toggleActionPanel(panelId, e)}
+              onOpenAportar={(goalId) => {
+                setDistributeModalState({
+                  isOpen: true,
+                  initialSource: {
+                    type: 'PRONTO',
+                  },
+                  initialDest: {
+                    type: 'META',
+                    goalId,
+                  },
+                });
+              }}
+              onOpenRetirar={(goalId) => {
+                setDistributeModalState({
+                  isOpen: true,
+                  initialSource: {
+                    type: 'META',
+                    goalId,
+                  },
+                  initialDest: {
+                    type: 'PRONTO',
+                  },
+                });
+              }}
+              onQuickAdjust={handleQuickAdjust}
+              maskValue={maskValue}
+            />
           )}
         </div>
       )}
@@ -1369,14 +1566,13 @@ export const PlanningScreen: React.FC = () => {
         />
       )}
 
-      {/* 2. Modal Alocar */}
+      {/* 2. Modal Alocar (exclusivo para envelopes) */}
       {allocateModalState && (
         <AllocateModal
           isOpen={allocateModalState.isOpen}
           onClose={() => setAllocateModalState(null)}
           categoryId={allocateModalState.categoryId}
           subcategoryId={allocateModalState.subcategoryId}
-          goalId={allocateModalState.goalId}
           titlePath={allocateModalState.titlePath}
           month={selectedMonth}
           readyToAssign={readyToAssign}
@@ -1386,7 +1582,7 @@ export const PlanningScreen: React.FC = () => {
         />
       )}
 
-      {/* 3. Modal Distribuir / Mover */}
+      {/* 3. Modal Distribuir / Mover / Aportar / Retirar */}
       {distributeModalState.isOpen && (
         <DistributeModal
           isOpen={distributeModalState.isOpen}
@@ -1396,6 +1592,7 @@ export const PlanningScreen: React.FC = () => {
           envelopeOptions={envelopeOptions}
           metaOptions={metaOptions}
           initialSource={distributeModalState.initialSource}
+          initialDest={distributeModalState.initialDest}
           onSuccess={showNotice}
         />
       )}

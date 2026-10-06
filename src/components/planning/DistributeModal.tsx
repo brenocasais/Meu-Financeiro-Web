@@ -38,6 +38,12 @@ interface DistributeModalProps {
     subcategoryId?: number | null;
     goalId?: number | null;
   };
+  initialDest?: {
+    type: EntityType;
+    categoryId?: number | null;
+    subcategoryId?: number | null;
+    goalId?: number | null;
+  };
   onSuccess: (message: string) => void;
 }
 
@@ -49,6 +55,7 @@ export const DistributeModal: React.FC<DistributeModalProps> = ({
   envelopeOptions,
   metaOptions,
   initialSource,
+  initialDest,
   onSuccess,
 }) => {
   const { user } = useAuth();
@@ -91,20 +98,37 @@ export const DistributeModal: React.FC<DistributeModalProps> = ({
         setSourceGoalId(metaOptions[0] ? String(metaOptions[0].id) : '');
       }
 
-      // Destino padrão: se origem for Pronto, destino default = Envelope; se origem for Envelope/Meta, destino default = Pronto
-      if (srcType === 'PRONTO') {
-        setDestType('ENVELOPE');
-        const firstEnv = envelopeOptions.find((e) => !e.archived);
-        setDestEnvelopeKey(firstEnv ? firstEnv.key : '');
-        setDestGoalId(metaOptions[0] ? String(metaOptions[0].id) : '');
+      // Destino
+      if (initialDest) {
+        setDestType(initialDest.type);
+        if (initialDest.type === 'META' && initialDest.goalId != null) {
+          setDestGoalId(String(initialDest.goalId));
+        } else {
+          setDestGoalId(metaOptions[0] ? String(metaOptions[0].id) : '');
+        }
+
+        if (initialDest.type === 'ENVELOPE' && initialDest.categoryId != null) {
+          setDestEnvelopeKey(`${initialDest.categoryId}:${initialDest.subcategoryId ?? 'null'}`);
+        } else {
+          const firstEnv = envelopeOptions.find((e) => !e.archived);
+          setDestEnvelopeKey(firstEnv ? firstEnv.key : '');
+        }
       } else {
-        setDestType('PRONTO');
-        const firstEnv = envelopeOptions.find((e) => !e.archived);
-        setDestEnvelopeKey(firstEnv ? firstEnv.key : '');
-        setDestGoalId(metaOptions[0] ? String(metaOptions[0].id) : '');
+        // Destino padrão: se origem for Pronto, destino default = Envelope; se origem for Envelope/Meta, destino default = Pronto
+        if (srcType === 'PRONTO') {
+          setDestType('ENVELOPE');
+          const firstEnv = envelopeOptions.find((e) => !e.archived);
+          setDestEnvelopeKey(firstEnv ? firstEnv.key : '');
+          setDestGoalId(metaOptions[0] ? String(metaOptions[0].id) : '');
+        } else {
+          setDestType('PRONTO');
+          const firstEnv = envelopeOptions.find((e) => !e.archived);
+          setDestEnvelopeKey(firstEnv ? firstEnv.key : '');
+          setDestGoalId(metaOptions[0] ? String(metaOptions[0].id) : '');
+        }
       }
     }
-  }, [isOpen, initialSource, envelopeOptions, metaOptions]);
+  }, [isOpen, initialSource, initialDest, envelopeOptions, metaOptions]);
 
   // Envelopes de origem filtrados: ocultar arquivadas, exceto a selecionada
   const sourceEnvelopeOptionsFiltered = useMemo(() => {
