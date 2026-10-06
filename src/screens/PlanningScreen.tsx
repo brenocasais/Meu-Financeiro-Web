@@ -40,6 +40,8 @@ import {
   EntityType,
 } from '../components/planning/DistributeModal';
 import { TransactionFormModal } from '../components/transactions/TransactionFormModal';
+import { RedistributionsReportModal } from '../components/planning/RedistributionsReportModal';
+import { EnvelopeTransactionHistoryModal } from '../components/planning/EnvelopeTransactionHistoryModal';
 
 type FilterChip = 'TODAS' | 'ALERTAS' | 'EXCEDIDAS' | 'DISPONIVEIS';
 
@@ -80,6 +82,299 @@ interface CalculatedGoalsCategory {
   alocado: number;
 }
 
+function useLongPressAction(
+  onLongPress: () => void,
+  onClick: (e: React.MouseEvent) => void
+) {
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const isLongPressActiveRef = useRef(false);
+
+  const start = (e: React.TouchEvent | React.MouseEvent) => {
+    if ('button' in e && e.button !== 0) return;
+    isLongPressActiveRef.current = false;
+    timerRef.current = setTimeout(() => {
+      isLongPressActiveRef.current = true;
+      onLongPress();
+    }, 500);
+  };
+
+  const cancel = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (isLongPressActiveRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      isLongPressActiveRef.current = false;
+      return;
+    }
+    onClick(e);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onLongPress();
+  };
+
+  return {
+    onTouchStart: start,
+    onTouchEnd: cancel,
+    onTouchMove: cancel,
+    onMouseDown: start,
+    onMouseUp: cancel,
+    onMouseLeave: cancel,
+    onClick: handleClick,
+    onContextMenu: handleContextMenu,
+  };
+}
+
+interface SubcategoryItemProps {
+  subItem: CalculatedSubcategory;
+  index: number;
+  isLast: boolean;
+  item: CalculatedCategory;
+  lastSubIconRef: React.RefObject<HTMLDivElement | null>;
+  activeActionPanel: string | null;
+  onToggleSubActionPanel: (panelId: string, e: React.MouseEvent) => void;
+  onOpenHistory: (categoryId: number, subcategoryId: number | null, catName: string, subName: string | null) => void;
+  onOpenPlan: (
+    categoryId: number,
+    subcategoryId: number | null,
+    categoryName: string,
+    subcategoryName: string | null,
+    currentPlannedValue: number
+  ) => void;
+  onOpenAllocate: (
+    categoryId: number,
+    subcategoryId: number | null,
+    titlePath: string,
+    planejadoDoMes: number,
+    alocadoDoMesSemSobra: number
+  ) => void;
+  onOpenMove: (categoryId: number, subcategoryId: number | null) => void;
+  onOpenTx: (categoryId: number, subcategoryId: number | null) => void;
+  onQuickAdjust: (params: {
+    categoryId: number;
+    subcategoryId?: number | null;
+    name: string;
+    planejado: number;
+    alocado: number;
+  }) => void;
+  monthAllocationInfo: Map<string, { planned: number; allocated: number }>;
+  maskValue: (val: string) => string;
+}
+
+const SubcategoryItem: React.FC<SubcategoryItemProps> = ({
+  subItem,
+  isLast,
+  item,
+  lastSubIconRef,
+  activeActionPanel,
+  onToggleSubActionPanel,
+  onOpenHistory,
+  onOpenPlan,
+  onOpenAllocate,
+  onOpenMove,
+  onOpenTx,
+  onQuickAdjust,
+  monthAllocationInfo,
+  maskValue,
+}) => {
+  const subActionPanelKey = `sub-${subItem.sub.id}`;
+  const isSubActionPanelOpen = activeActionPanel === subActionPanelKey;
+
+  const longPress = useLongPressAction(
+    () => {
+      onOpenHistory(item.cat.id, subItem.sub.id, item.cat.name, subItem.sub.name);
+    },
+    (e) => {
+      onToggleSubActionPanel(subActionPanelKey, e);
+    }
+  );
+
+  return (
+    <div
+      id={`subcat-item-${subItem.sub.id}`}
+      className="relative pl-7 space-y-1"
+    >
+      {/* Ramal horizontal pontilhado ligando o tronco central ao ícone da subcategoria */}
+      <div
+        className="absolute left-[16px] top-[12px] w-6 h-px border-b border-dashed border-[#E6E9EC] dark:border-[#283438] pointer-events-none"
+        aria-hidden="true"
+      />
+
+      {/* Tocar na subcategoria abre/fecha o painel de ações; toque longo abre histórico */}
+      <div
+        {...longPress}
+        className="cursor-pointer select-none rounded-lg hover:bg-black/5 dark:hover:bg-white/5 p-1 -m-1 transition-colors"
+      >
+        {/* Sub Linha 1: Ícone + Nome + Disponível */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div
+              ref={isLast ? lastSubIconRef : undefined}
+              className={`w-6 h-6 rounded-md flex items-center justify-center text-xs shrink-0 relative z-10 ${
+                subItem.isRed
+                  ? 'bg-[#EF4444]/15 dark:bg-[#FF4D55]/15 text-[#EF4444] dark:text-[#FF4D55]'
+                  : 'bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A]'
+              }`}
+            >
+              {subItem.sub.icon || '📄'}
+            </div>
+            <span className="text-[13px] font-medium text-[#111827] dark:text-[#F5F7F8] truncate">
+              {subItem.sub.name}
+            </span>
+          </div>
+
+          <span
+            className={`text-[11.5px] font-semibold shrink-0 ${
+              subItem.disponivel >= 0
+                ? 'text-[#22A45D] dark:text-[#39D47A]'
+                : 'text-[#EF4444] dark:text-[#FF4D55]'
+            }`}
+          >
+            {subItem.disponivel >= 0
+              ? `${maskValue(formatCurrencyBRL(subItem.disponivel))} disponíveis`
+              : `${maskValue(formatCurrencyBRL(Math.abs(subItem.disponivel)))} acima`}
+          </span>
+        </div>
+
+        {/* Sub Linha 2: Planejado | Alocado | Gasto e percentual */}
+        <div className="flex items-end justify-between gap-2 pl-8">
+          <div className="flex items-center gap-3.5 text-left">
+            <div>
+              <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                Planejado
+              </span>
+              <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                {maskValue(formatCurrencyBRL(subItem.planejado))}
+              </span>
+            </div>
+
+            <div>
+              <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                Alocado
+              </span>
+              <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                {maskValue(formatCurrencyBRL(subItem.alocado))}
+              </span>
+            </div>
+
+            <div>
+              <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
+                Gasto
+              </span>
+              <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
+                {maskValue(formatCurrencyBRL(subItem.gasto))}
+              </span>
+            </div>
+          </div>
+
+          <span
+            className="text-[10.5px] font-bold tracking-tight"
+            style={{ color: subItem.barColorHex }}
+          >
+            {subItem.percent}%
+          </span>
+        </div>
+
+        {/* Sub Linha 3: Barra de 5px */}
+        <div className="pl-8 pt-0.5">
+          <div className="w-full h-[5px] rounded-[3px] bg-[#EAEAEA] dark:bg-[#202B2E] overflow-hidden">
+            <div
+              className="h-full rounded-[3px] transition-all duration-300"
+              style={{
+                width: `${subItem.alocado > 0 ? Math.min(100, Math.max(0, (subItem.gasto / subItem.alocado) * 100)) : 0}%`,
+                backgroundColor: subItem.barColorHex,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Painel de ações da subcategoria (5 botões sem símbolos, sem truncar) */}
+      {isSubActionPanelOpen && (
+        <div className="pl-8 pt-1.5 animate-in fade-in duration-150">
+          <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438]">
+            <button
+              type="button"
+              onClick={() =>
+                onOpenPlan(
+                  item.cat.id,
+                  subItem.sub.id,
+                  item.cat.name,
+                  subItem.sub.name,
+                  subItem.planejado
+                )
+              }
+              className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Planejar
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const allocInM = monthAllocationInfo.get(
+                  `${item.cat.id}:${subItem.sub.id}`
+                );
+                const alocadoDoMesSemSobra = allocInM ? allocInM.allocated : 0;
+                onOpenAllocate(
+                  item.cat.id,
+                  subItem.sub.id,
+                  `${item.cat.name} > ${subItem.sub.name}`,
+                  subItem.planejado,
+                  alocadoDoMesSemSobra
+                );
+              }}
+              className="py-1.5 px-0.5 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Alocar
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onOpenMove(item.cat.id, subItem.sub.id)}
+              className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Mover
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onOpenTx(item.cat.id, subItem.sub.id)}
+              className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Transação
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                onQuickAdjust({
+                  categoryId: item.cat.id,
+                  subcategoryId: subItem.sub.id,
+                  name: subItem.sub.name,
+                  planejado: subItem.planejado,
+                  alocado: subItem.alocado,
+                })
+              }
+              className="py-1.5 px-0.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
+            >
+              Ajustar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 interface PlanningCategoryCardProps {
   item: CalculatedCategory;
   isExpanded: boolean;
@@ -89,6 +384,7 @@ interface PlanningCategoryCardProps {
   activeActionPanel: string | null;
   onToggleSubActionPanel: (panelId: string, e: React.MouseEvent) => void;
   displayedSubs: CalculatedSubcategory[];
+  onOpenHistory: (categoryId: number, subcategoryId: number | null, catName: string, subName: string | null) => void;
   onOpenPlan: (
     categoryId: number,
     subcategoryId: number | null,
@@ -125,6 +421,7 @@ const PlanningCategoryCard: React.FC<PlanningCategoryCardProps> = ({
   activeActionPanel,
   onToggleSubActionPanel,
   displayedSubs,
+  onOpenHistory,
   onOpenPlan,
   onOpenAllocate,
   onOpenMove,
@@ -167,6 +464,19 @@ const PlanningCategoryCard: React.FC<PlanningCategoryCardProps> = ({
     return () => ro.disconnect();
   }, [isExpanded, hasVisibleSubs, displayedSubs.length, activeActionPanel]);
 
+  const catLongPress = useLongPressAction(
+    () => {
+      onOpenHistory(item.cat.id, null, item.cat.name, null);
+    },
+    (e) => {
+      if (hasVisibleSubs) {
+        onToggleExpand();
+      } else {
+        onToggleCatActionPanel(e);
+      }
+    }
+  );
+
   return (
     <div
       ref={cardRef}
@@ -182,15 +492,9 @@ const PlanningCategoryCard: React.FC<PlanningCategoryCardProps> = ({
         />
       )}
 
-      {/* Linha 1: Ícone + Nome + Disponibilidade + Seta */}
+      {/* Linha 1: Ícone + Nome + Disponibilidade + Seta (com suporte a toque longo e clique com botão direito) */}
       <div
-        onClick={(e) => {
-          if (hasVisibleSubs) {
-            onToggleExpand();
-          } else {
-            onToggleCatActionPanel(e);
-          }
-        }}
+        {...catLongPress}
         className="flex items-center justify-between gap-2.5 cursor-pointer select-none relative z-10"
       >
         <div className="flex items-center gap-2.5 min-w-0">
@@ -354,185 +658,25 @@ const PlanningCategoryCard: React.FC<PlanningCategoryCardProps> = ({
             <div className="space-y-3">
               {displayedSubs.map((subItem, index) => {
                 const isLast = index === displayedSubs.length - 1;
-                const subActionPanelKey = `sub-${subItem.sub.id}`;
-                const isSubActionPanelOpen = activeActionPanel === subActionPanelKey;
-
                 return (
-                  <div
+                  <SubcategoryItem
                     key={subItem.sub.id}
-                    id={`subcat-item-${subItem.sub.id}`}
-                    className="relative pl-7 space-y-1"
-                  >
-                    {/* Ramal horizontal pontilhado ligando o tronco central ao ícone da subcategoria */}
-                    <div
-                      className="absolute left-[16px] top-[12px] w-6 h-px border-b border-dashed border-[#E6E9EC] dark:border-[#283438] pointer-events-none"
-                      aria-hidden="true"
-                    />
-
-                    {/* Tocar na subcategoria abre/fecha o painel de ações */}
-                    <div
-                      onClick={(e) => onToggleSubActionPanel(subActionPanelKey, e)}
-                      className="cursor-pointer select-none rounded-lg hover:bg-black/5 dark:hover:bg-white/5 p-1 -m-1 transition-colors"
-                    >
-                      {/* Sub Linha 1: Ícone + Nome + Disponível */}
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div
-                            ref={isLast ? lastSubIconRef : undefined}
-                            className={`w-6 h-6 rounded-md flex items-center justify-center text-xs shrink-0 relative z-10 ${
-                              subItem.isRed
-                                ? 'bg-[#EF4444]/15 dark:bg-[#FF4D55]/15 text-[#EF4444] dark:text-[#FF4D55]'
-                                : 'bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A]'
-                            }`}
-                          >
-                            {subItem.sub.icon || '📄'}
-                          </div>
-                          <span className="text-[13px] font-medium text-[#111827] dark:text-[#F5F7F8] truncate">
-                            {subItem.sub.name}
-                          </span>
-                        </div>
-
-                        <span
-                          className={`text-[11.5px] font-semibold shrink-0 ${
-                            subItem.disponivel >= 0
-                              ? 'text-[#22A45D] dark:text-[#39D47A]'
-                              : 'text-[#EF4444] dark:text-[#FF4D55]'
-                          }`}
-                        >
-                          {subItem.disponivel >= 0
-                            ? `${maskValue(formatCurrencyBRL(subItem.disponivel))} disponíveis`
-                            : `${maskValue(formatCurrencyBRL(Math.abs(subItem.disponivel)))} acima`}
-                        </span>
-                      </div>
-
-                      {/* Sub Linha 2: Planejado | Alocado | Gasto e percentual */}
-                      <div className="flex items-end justify-between gap-2 pl-8">
-                        <div className="flex items-center gap-3.5 text-left">
-                          <div>
-                            <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                              Planejado
-                            </span>
-                            <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                              {maskValue(formatCurrencyBRL(subItem.planejado))}
-                            </span>
-                          </div>
-
-                          <div>
-                            <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                              Alocado
-                            </span>
-                            <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                              {maskValue(formatCurrencyBRL(subItem.alocado))}
-                            </span>
-                          </div>
-
-                          <div>
-                            <span className="block text-[9.5px] text-[#6B7280] dark:text-[#9FA9AB] leading-none">
-                              Gasto
-                            </span>
-                            <span className="text-[11px] font-semibold text-[#111827] dark:text-[#F5F7F8] mt-0.5 block leading-tight">
-                              {maskValue(formatCurrencyBRL(subItem.gasto))}
-                            </span>
-                          </div>
-                        </div>
-
-                        <span
-                          className="text-[10.5px] font-bold tracking-tight"
-                          style={{ color: subItem.barColorHex }}
-                        >
-                          {subItem.percent}%
-                        </span>
-                      </div>
-
-                      {/* Sub Linha 3: Barra de 5px */}
-                      <div className="pl-8 pt-0.5">
-                        <div className="w-full h-[5px] rounded-[3px] bg-[#EAEAEA] dark:bg-[#202B2E] overflow-hidden">
-                          <div
-                            className="h-full rounded-[3px] transition-all duration-300"
-                            style={{
-                              width: `${subItem.alocado > 0 ? Math.min(100, Math.max(0, (subItem.gasto / subItem.alocado) * 100)) : 0}%`,
-                              backgroundColor: subItem.barColorHex,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Painel de ações da subcategoria (5 botões sem símbolos, sem truncar) */}
-                    {isSubActionPanelOpen && (
-                      <div className="pl-8 pt-1.5 animate-in fade-in duration-150">
-                        <div className="grid grid-cols-5 gap-1 p-1 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438]">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onOpenPlan(
-                                item.cat.id,
-                                subItem.sub.id,
-                                item.cat.name,
-                                subItem.sub.name,
-                                subItem.planejado
-                              )
-                            }
-                            className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
-                          >
-                            Planejar
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const allocInM = monthAllocationInfo.get(
-                                `${item.cat.id}:${subItem.sub.id}`
-                              );
-                              const alocadoDoMesSemSobra = allocInM ? allocInM.allocated : 0;
-                              onOpenAllocate(
-                                item.cat.id,
-                                subItem.sub.id,
-                                `${item.cat.name} > ${subItem.sub.name}`,
-                                subItem.planejado,
-                                alocadoDoMesSemSobra
-                              );
-                            }}
-                            className="py-1.5 px-0.5 rounded-lg bg-[#22A45D]/15 dark:bg-[#39D47A]/15 text-[#22A45D] dark:text-[#39D47A] hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
-                          >
-                            Alocar
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => onOpenMove(item.cat.id, subItem.sub.id)}
-                            className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
-                          >
-                            Mover
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => onOpenTx(item.cat.id, subItem.sub.id)}
-                            className="py-1.5 px-0.5 rounded-lg bg-white dark:bg-[#172022] hover:bg-black/5 dark:hover:bg-white/5 border border-[#E6E9EC] dark:border-[#283438] text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
-                          >
-                            Transação
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onQuickAdjust({
-                                categoryId: item.cat.id,
-                                subcategoryId: subItem.sub.id,
-                                name: subItem.sub.name,
-                                planejado: subItem.planejado,
-                                alocado: subItem.alocado,
-                              })
-                            }
-                            className="py-1.5 px-0.5 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:opacity-90 text-center font-semibold text-[10px] min-[380px]:text-[11px] leading-tight cursor-pointer whitespace-nowrap overflow-visible"
-                          >
-                            Ajustar
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                    subItem={subItem}
+                    index={index}
+                    isLast={isLast}
+                    item={item}
+                    lastSubIconRef={lastSubIconRef}
+                    activeActionPanel={activeActionPanel}
+                    onToggleSubActionPanel={onToggleSubActionPanel}
+                    onOpenHistory={onOpenHistory}
+                    onOpenPlan={onOpenPlan}
+                    onOpenAllocate={onOpenAllocate}
+                    onOpenMove={onOpenMove}
+                    onOpenTx={onOpenTx}
+                    onQuickAdjust={onQuickAdjust}
+                    monthAllocationInfo={monthAllocationInfo}
+                    maskValue={maskValue}
+                  />
                 );
               })}
             </div>
@@ -779,7 +923,11 @@ const PlanningGoalsCard: React.FC<PlanningGoalsCardProps> = ({
   );
 };
 
-export const PlanningScreen: React.FC = () => {
+export interface PlanningScreenProps {
+  onOpenTransaction?: (txId: string | number) => void;
+}
+
+export const PlanningScreen: React.FC<PlanningScreenProps> = ({ onOpenTransaction }) => {
   const { user } = useAuth();
   const { data, loading, selectedMonth, hideValues } = useFinance();
   const { theme } = useTheme();
@@ -836,6 +984,16 @@ export const PlanningScreen: React.FC = () => {
   const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [savingNewCat, setSavingNewCat] = useState(false);
+
+  // Estados dos modais de relatório e histórico (Fase 5c)
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [historyModalState, setHistoryModalState] = useState<{
+    isOpen: boolean;
+    categoryId: number;
+    subcategoryId?: number | null;
+    categoryName: string;
+    subcategoryName?: string | null;
+  } | null>(null);
 
   // Helper para mascarar valores monetários respeitando a privacidade
   const maskValue = (formattedText: string): string => {
@@ -1327,7 +1485,7 @@ export const PlanningScreen: React.FC = () => {
           <button
             id="btn-planning-report"
             type="button"
-            onClick={() => showNotice('Relatório detalhado disponível na próxima etapa')}
+            onClick={() => setIsReportModalOpen(true)}
             className="h-[34px] rounded-[10px] border border-[#E6E9EC] dark:border-[#283438] text-[#111827] dark:text-[#F5F7F8] bg-transparent text-[11px] font-semibold flex items-center justify-center hover:bg-black/5 dark:hover:bg-white/5 active:scale-98 transition-all cursor-pointer"
           >
             Relatório
@@ -1462,6 +1620,15 @@ export const PlanningScreen: React.FC = () => {
                 activeActionPanel={activeActionPanel}
                 onToggleSubActionPanel={(panelId, e) => toggleActionPanel(panelId, e)}
                 displayedSubs={displayedSubs}
+                onOpenHistory={(categoryId, subcategoryId, catName, subName) => {
+                  setHistoryModalState({
+                    isOpen: true,
+                    categoryId,
+                    subcategoryId,
+                    categoryName: catName,
+                    subcategoryName: subName,
+                  });
+                }}
                 onOpenPlan={(categoryId, subcategoryId, categoryName, subcategoryName, currentPlannedValue) => {
                   setPlanModalState({
                     isOpen: true,
@@ -1676,6 +1843,38 @@ export const PlanningScreen: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 6. Modal de Relatório de Redistribuições (Fase 5c) */}
+      <RedistributionsReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        selectedMonth={selectedMonth}
+        allocationMovements={data.allocation_movements || []}
+        budgetAllocations={data.budget_allocations || []}
+        categories={data.categories || []}
+        subcategories={data.subcategories || []}
+        goals={data.goals || []}
+        hideValues={hideValues}
+      />
+
+      {/* 7. Modal de Histórico de Transações por Categoria/Subcategoria (Fase 5c) */}
+      {historyModalState && (
+        <EnvelopeTransactionHistoryModal
+          isOpen={historyModalState.isOpen}
+          onClose={() => setHistoryModalState(null)}
+          categoryId={historyModalState.categoryId}
+          subcategoryId={historyModalState.subcategoryId}
+          categoryName={historyModalState.categoryName}
+          subcategoryName={historyModalState.subcategoryName}
+          selectedMonth={selectedMonth}
+          transactions={data.transactions || []}
+          accounts={data.accounts || []}
+          hideValues={hideValues}
+          onSelectTransaction={(txId) => {
+            onOpenTransaction?.(txId);
+          }}
+        />
       )}
     </div>
   );

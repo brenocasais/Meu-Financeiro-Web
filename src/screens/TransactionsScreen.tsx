@@ -125,8 +125,28 @@ function getPreviousMonthString(monthStr: string): string {
   return `${y}-${String(m).padStart(2, '0')}`;
 }
 
-export const TransactionsScreen: React.FC = () => {
+export interface TransactionsScreenProps {
+  highlightedTransactionId?: string | number | null;
+  onClearHighlight?: () => void;
+}
+
+export const TransactionsScreen: React.FC<TransactionsScreenProps> = ({
+  highlightedTransactionId,
+}) => {
   const { data, selectedMonth, setSelectedMonth, hideValues } = useFinance();
+
+  // Scroll automático até a transação destacada se houver
+  React.useEffect(() => {
+    if (highlightedTransactionId) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`tx-row-${highlightedTransactionId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedTransactionId]);
 
   // Estados locais
   const [searchQuery, setSearchQuery] = useState('');
@@ -663,14 +683,23 @@ export const TransactionsScreen: React.FC = () => {
                       : originAccountName;
                   }
 
+                  const isHighlighted =
+                    highlightedTransactionId != null &&
+                    String(tx.id) === String(highlightedTransactionId);
+
                   return (
                     <div
                       key={tx.id}
+                      id={`tx-row-${tx.id}`}
                       onClick={() => {
                         setEditingTransaction(tx);
                         setIsNewTxModalOpen(true);
                       }}
-                      className="p-3 sm:p-3.5 flex items-center justify-between gap-3 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-colors"
+                      className={`p-3 sm:p-3.5 flex items-center justify-between gap-3 hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition-all ${
+                        isHighlighted
+                          ? 'ring-2 ring-[#22A45D] dark:ring-[#39D47A] bg-[#22A45D]/15 dark:bg-[#39D47A]/15 rounded-xl animate-pulse'
+                          : ''
+                      }`}
                       title="Clique para editar esta transação"
                     >
                       {/* Lado esquerdo: Círculo de 36px + Textos */}
