@@ -1,6 +1,6 @@
 import { doc, onSnapshot, getDoc, setDoc, updateDoc, arrayUnion, DocumentReference, Unsubscribe } from 'firebase/firestore';
 import { db } from './config';
-import { UserFirestoreData, Transaction, Category, Subcategory, InstallmentPlan, RecurrenceRule, BudgetAllocation, AllocationMovement } from '../types/finance';
+import { UserFirestoreData, Transaction, Category, Subcategory, InstallmentPlan, RecurrenceRule, BudgetAllocation, AllocationMovement, Goal } from '../types/finance';
 import { generateNumericId, MoveMoneyParams, executeMoveMoneyLogic, collectAllExistingNumericIds } from '../lib/financeLogic';
 
 /**
@@ -690,5 +690,71 @@ export async function moveMoney(
   const result = executeMoveMoneyLogic(params, currentAllocations, currentMovements, usedIds);
   await saveBudgetAllocationsAndMovements(userId, result.updatedAllocations, result.updatedMovements);
   return result;
+}
+
+/**
+ * Salva atomicamente o array `goals` numa ÚNICA chamada updateDoc (Fase 6b).
+ */
+export async function saveGoals(
+  userId: string,
+  updatedGoals: Goal[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedGoals = sanitizeForFirestore(updatedGoals);
+
+  try {
+    await updateDoc(docRef, {
+      goals: sanitizedGoals,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em saveGoals, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          goals: sanitizedGoals,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao gravar metas: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+}
+
+/**
+ * Salva atomicamente o array `allocation_movements` numa ÚNICA chamada updateDoc (Fase 6b).
+ */
+export async function saveAllocationMovementsOnly(
+  userId: string,
+  updatedMovements: AllocationMovement[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedMovements = sanitizeForFirestore(updatedMovements);
+
+  try {
+    await updateDoc(docRef, {
+      allocation_movements: sanitizedMovements,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em saveAllocationMovementsOnly, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          allocation_movements: sanitizedMovements,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao gravar movimentos de alocação: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
 }
 

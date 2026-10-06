@@ -77,14 +77,11 @@ export const EnvelopeTransactionHistoryModal: React.FC<EnvelopeTransactionHistor
   const envelopeTransactions = useMemo(() => {
     const list = transactions.filter((t) => {
       if (!t.date || !t.date.startsWith(selectedMonth)) return false;
-      // Não listar transações de meta aqui (as metas são acompanhadas em Metas)
-      if ((t as any).destination_goal_id != null) return false;
       if (Number(t.category_id) !== Number(categoryId)) return false;
+      // Toque longo numa SUBCATEGORIA: só as com category_id e subcategory_id iguais aos dela
+      // Toque longo numa CATEGORIA (subcategoryId == null): todas as transações com category_id igual ao da categoria
       if (subcategoryId != null) {
         if (Number(t.subcategory_id) !== Number(subcategoryId)) return false;
-      } else {
-        // Se categoria sem sub ou toque na categoria: subcategory_id nulo
-        if (t.subcategory_id != null) return false;
       }
       return true;
     });
@@ -148,7 +145,7 @@ export const EnvelopeTransactionHistoryModal: React.FC<EnvelopeTransactionHistor
             <div className="py-12 text-center space-y-2 border border-dashed border-[#E6E9EC] dark:border-[#283438] rounded-2xl">
               <Receipt className="w-8 h-8 text-[#6B7280] dark:text-[#9FA9AB] mx-auto opacity-70" />
               <p className="text-xs font-medium text-[#6B7280] dark:text-[#9FA9AB] px-4">
-                Nenhuma transação neste envelope em {formattedMonthTitle}.
+                Nenhuma transação registrada neste mês para este envelope.
               </p>
             </div>
           ) : (

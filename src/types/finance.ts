@@ -103,6 +103,8 @@ export interface Goal {
   deadline: string;
   is_paused: boolean;
   archived: boolean;
+  color?: number; // inteiro ARGB com sinal, ex.: -13840847
+  start_date?: string; // "YYYY-MM"
 }
 
 /**
