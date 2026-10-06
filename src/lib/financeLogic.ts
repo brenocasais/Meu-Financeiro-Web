@@ -1,5 +1,7 @@
 import {
   Account,
+  Category,
+  Subcategory,
   Transaction,
   BudgetAllocation,
   AllocationMovement,
@@ -828,10 +830,256 @@ export function calculateGoalCurrentValue(
 }
 
 /**
- * 6. Pronto para Atribuir:
- * Pronto para Atribuir = saldo total das contas 
- *                      - soma do Disponível de TODAS as alocações com month <= selectedMonth
- *                      - soma do current_value de todas as metas
+ * Retorna o mês anterior no formato "YYYY-MM".
+ */
+export function getPreviousMonthStr(m: string): string {
+  const [yearStr, monthStr] = m.split('-');
+  let year = parseInt(yearStr, 10);
+  let month = parseInt(monthStr, 10);
+  month -= 1;
+  if (month < 1) {
+    month = 12;
+    year -= 1;
+  }
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+/**
+ * Retorna "YYYY-MM" em horário local a partir de um timestamp em milissegundos.
+ */
+export function monthFromTimestamp(ms: number): string {
+  const d = new Date(ms);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+/**
+ * Retorna a lista inclusiva de meses no formato "YYYY-MM" entre start e end.
+ */
+export function getMonthsInRange(start: string, end: string): string[] {
+  if (start > end) return [];
+  const result: string[] = [];
+  let current = start;
+  while (current <= end) {
+    result.push(current);
+    const [yStr, mStr] = current.split('-');
+    let y = parseInt(yStr, 10);
+    let m = parseInt(mStr, 10);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    current = `${y}-${String(m).padStart(2, '0')}`;
+  }
+  return result;
+}
+
+/**
+ * Calcula o mapa de sobras acumuladas até o mês upToMonth.
+ * Chave: `${category_id}:${subcategory_id ?? "null"}`.
+ */
+export function getCumulativeLeftoversMap(
+  allocs: BudgetAllocation[],
+  movements: AllocationMovement[],
+  txs: Transaction[],
+  categories: Category[],
+  subcategories: Subcategory[],
+  upToMonth: string
+): Map<string, number> {
+  // months = conjunto com todo allocation.month, todo date.slice(0,7) das transações (se date tiver >= 7 chars) e upToMonth;
+  // manter só os <= upToMonth; ordenar crescente.
+  const monthsSet = new Set<string>();
+  for (const alloc of allocs) {
+    if (alloc.month) monthsSet.add(alloc.month);
+  }
+  for (const tx of txs) {
+    if (typeof tx.date === 'string' && tx.date.length >= 7) {
+      monthsSet.add(tx.date.slice(0, 7));
+    }
+  }
+  if (upToMonth) {
+    monthsSet.add(upToMonth);
+  }
+
+  const months = Array.from(monthsSet)
+    .filter((m) => m <= upToMonth)
+    .sort();
+
+  // Inicialize em 0: (cat,null) para cada categoria e (cat,sub) para cada subcategoria.
+  const map = new Map<string, number>();
+  for (const cat of categories) {
+    map.set(`${cat.id}:null`, 0);
+  }
+  for (const sub of subcategories) {
+    map.set(`${sub.category_id}:${sub.id}`, 0);
+  }
+
+  // Para cada mês m, na ordem:
+  for (const m of months) {
+    const allocsInMonth = allocs.filter((a) => a.month === m);
+    const despesas = txs.filter(
+      (tx) => tx.type === 'DESPESA' && typeof tx.date === 'string' && tx.date.startsWith(m)
+    );
+
+    // subSpent[(cat,sub)] = soma das despesas com subcategory_id != null
+    const subSpent = new Map<string, number>();
+    for (const tx of despesas) {
+      if (tx.subcategory_id != null && tx.category_id != null) {
+        const key = `${tx.category_id}:${tx.subcategory_id}`;
+        subSpent.set(key, (subSpent.get(key) || 0) + (Number(tx.value) || 0));
+      }
+    }
+
+    // catSpent[(cat,null)] = soma de TODAS as despesas agrupadas por category_id (com ou sem subcategoria)
+    const catSpent = new Map<number, number>();
+    for (const tx of despesas) {
+      if (tx.category_id != null) {
+        const catId = Number(tx.category_id);
+        catSpent.set(catId, (catSpent.get(catId) || 0) + (Number(tx.value) || 0));
+      }
+    }
+
+    // Para cada subcategoria: alloc = alocação de m com esse category_id e subcategory_id;
+    // allocated = soma(dest_budget_allocation_id = alloc.id) - soma(source_budget_allocation_id = alloc.id), ou 0 se não houver alloc;
+    // map[(cat,sub)] += allocated - subSpent
+    for (const sub of subcategories) {
+      const key = `${sub.category_id}:${sub.id}`;
+      const alloc = allocsInMonth.find(
+        (a) => Number(a.category_id) === Number(sub.category_id) && Number(a.subcategory_id) === Number(sub.id)
+      );
+      const allocated = alloc ? calculateBudgetAllocationAllocated(alloc.id, movements) : 0;
+      const spent = subSpent.get(key) || 0;
+      map.set(key, (map.get(key) || 0) + (allocated - spent));
+    }
+
+    // Para cada categoria SEM nenhuma subcategoria (considere também as arquivadas):
+    // alloc com subcategory_id nulo; map[(cat,null)] += allocated - catSpent[(cat,null)]
+    for (const cat of categories) {
+      const hasAnySubcategory = subcategories.some(
+        (s) => Number(s.category_id) === Number(cat.id)
+      );
+      if (!hasAnySubcategory) {
+        const key = `${cat.id}:null`;
+        const alloc = allocsInMonth.find(
+          (a) => Number(a.category_id) === Number(cat.id) && a.subcategory_id == null
+        );
+        const allocated = alloc ? calculateBudgetAllocationAllocated(alloc.id, movements) : 0;
+        const spent = catSpent.get(Number(cat.id)) || 0;
+        map.set(key, (map.get(key) || 0) + (allocated - spent));
+      }
+    }
+  }
+
+  return map;
+}
+
+export interface MonthMapsResult {
+  allocationInfo: Map<string, { planned: number; allocated: number }>;
+  spentInfo: Map<string, number>;
+}
+
+/**
+ * Constrói os mapas do mês:
+ * - allocationInfo: Map<chave, {planned, allocated}> das alocações do mês
+ * - spentInfo: Map<chave, number>: despesas do mês por (cat,sub) para as que têm subcategoria,
+ *   MAIS por (cat,null) com TODAS as despesas da categoria.
+ */
+export function buildMonthMaps(
+  month: string,
+  allocs: BudgetAllocation[],
+  movements: AllocationMovement[],
+  txs: Transaction[]
+): MonthMapsResult {
+  const allocationInfo = new Map<string, { planned: number; allocated: number }>();
+  const spentInfo = new Map<string, number>();
+
+  for (const alloc of allocs) {
+    if (alloc.month === month) {
+      const key = `${alloc.category_id}:${alloc.subcategory_id ?? 'null'}`;
+      const planned = Number(alloc.planned_value) || 0;
+      const allocated = calculateBudgetAllocationAllocated(alloc.id, movements);
+      allocationInfo.set(key, { planned, allocated });
+    }
+  }
+
+  const despesas = txs.filter(
+    (tx) => tx.type === 'DESPESA' && typeof tx.date === 'string' && tx.date.startsWith(month)
+  );
+
+  for (const tx of despesas) {
+    const val = Number(tx.value) || 0;
+    if (tx.category_id != null) {
+      // (cat,null) com TODAS as despesas da categoria (com ou sem subcategoria)
+      const catKey = `${tx.category_id}:null`;
+      spentInfo.set(catKey, (spentInfo.get(catKey) || 0) + val);
+
+      // (cat,sub) para as que têm subcategoria
+      if (tx.subcategory_id != null) {
+        const subKey = `${tx.category_id}:${tx.subcategory_id}`;
+        spentInfo.set(subKey, (spentInfo.get(subKey) || 0) + val);
+      }
+    }
+  }
+
+  return { allocationInfo, spentInfo };
+}
+
+/**
+ * Gera meses a partir de startMonth somando `interval` (mín. 1) meses ou anos.
+ * Limite: com "NUNCA", startMonth + 2 anos; com "ATE", até o fim do mês endMonth, inclusive. No máximo 100 itens.
+ */
+export function getCustomRecurrenceMonths(
+  startMonth: string,
+  interval: number,
+  unit: 'MESES' | 'ANOS',
+  endMode: 'NUNCA' | 'ATE',
+  endMonth?: string
+): string[] {
+  const safeInterval = Math.max(1, Math.floor(interval) || 1);
+  const monthsToAdd = unit === 'ANOS' ? safeInterval * 12 : safeInterval;
+
+  const [startYStr, startMStr] = startMonth.split('-');
+  const startY = parseInt(startYStr, 10);
+  const startM = parseInt(startMStr, 10);
+
+  let limitMonth: string;
+  if (endMode === 'NUNCA') {
+    // startMonth + 2 anos (24 meses depois)
+    limitMonth = `${startY + 2}-${String(startM).padStart(2, '0')}`;
+  } else {
+    limitMonth = endMonth || startMonth;
+  }
+
+  const results: string[] = [];
+  let currentY = startY;
+  let currentM = startM;
+  let currentStr = `${currentY}-${String(currentM).padStart(2, '0')}`;
+
+  while (currentStr <= limitMonth && results.length < 100) {
+    results.push(currentStr);
+
+    const totalMonths = currentY * 12 + (currentM - 1) + monthsToAdd;
+    currentY = Math.floor(totalMonths / 12);
+    currentM = (totalMonths % 12) + 1;
+    currentStr = `${currentY}-${String(currentM).padStart(2, '0')}`;
+  }
+
+  return results;
+}
+
+/**
+ * 6. Pronto para Atribuir (Fórmula alinhada com o Android - Fase 5-0):
+ * Para o mês selecionado M ("YYYY-MM"):
+ * a) Saldo das contas: para CADA conta (INCLUINDO as arquivadas, igual ao Android): initial_balance
+ *      + soma das transações com date.slice(0,7) <= M que sejam RECEITA da conta ou TRANSFERENCIA cuja to_account_id é a conta
+ *      - soma das transações com date.slice(0,7) <= M que sejam DESPESA da conta ou TRANSFERENCIA cuja account_id é a conta.
+ *    Some o resultado de todas as contas.
+ * b) Disponível acumulado: sem mudança (todas as BudgetAllocation com month <= M; alocado - gasto de cada uma).
+ * c) Metas: para cada meta (sem filtrar arquivadas), soma dos movimentos em que dest_goal_id = meta menos os em que source_goal_id = meta,
+ *    contando SÓ movimentos cujo mês de moved_at (horário local, "YYYY-MM") seja <= M.
+ * d) Pronto = (a) - (b) - (c).
  */
 export function calculateReadyToAssign(
   selectedMonth: string, // formato 'YYYY-MM'
@@ -841,13 +1089,35 @@ export function calculateReadyToAssign(
   allocationMovements: AllocationMovement[],
   goals: Goal[]
 ): ReadyToAssignCalculation {
-  // 1. Saldo total de todas as contas ativas
-  const totalAccountsBalance = calculateTotalAccountsBalance(accounts, transactions);
+  // a) Saldo de todas as contas (incluindo arquivadas) considerando apenas transações até selectedMonth
+  const totalAccountsBalance = accounts.reduce((total, account) => {
+    const initialBalance = Number(account.initial_balance) || 0;
+    let credits = 0;
+    let debits = 0;
 
-  // 2. Filtrar BudgetAllocation por month <= selectedMonth
+    for (const tx of transactions) {
+      const txMonth = typeof tx.date === 'string' && tx.date.length >= 7 ? tx.date.slice(0, 7) : '';
+      if (!txMonth || txMonth > selectedMonth) continue;
+
+      const val = Number(tx.value) || 0;
+      if (tx.type === 'RECEITA' && tx.account_id === account.id) {
+        credits += val;
+      } else if (tx.type === 'TRANSFERENCIA' && tx.to_account_id === account.id) {
+        credits += val;
+      }
+
+      if (tx.type === 'DESPESA' && tx.account_id === account.id) {
+        debits += val;
+      } else if (tx.type === 'TRANSFERENCIA' && tx.account_id === account.id) {
+        debits += val;
+      }
+    }
+
+    return total + (initialBalance + credits - debits);
+  }, 0);
+
+  // b) Disponível acumulado: todas as BudgetAllocation com month <= selectedMonth
   const relevantAllocations = budgetAllocations.filter((b) => b.month <= selectedMonth);
-
-  // Soma do Disponível (Alocado - Gasto) de todas as alocações elegíveis
   let totalAvailableAccumulated = 0;
   for (const allocation of relevantAllocations) {
     const allocated = calculateBudgetAllocationAllocated(allocation.id, allocationMovements);
@@ -856,12 +1126,26 @@ export function calculateReadyToAssign(
     totalAvailableAccumulated += available;
   }
 
-  // 3. Soma do current_value de todas as metas ativas
+  // c) Metas: soma dos movimentos onde dest_goal_id = meta menos onde source_goal_id = meta,
+  // contando SÓ movimentos cujo mês de moved_at (horário local, "YYYY-MM") seja <= selectedMonth
   const totalGoalsCurrentValue = goals.reduce((sum, goal) => {
-    return sum + calculateGoalCurrentValue(goal.id, allocationMovements);
+    let goalTotal = 0;
+    for (const movement of allocationMovements) {
+      const moveMonth = monthFromTimestamp(Number(movement.moved_at) || 0);
+      if (moveMonth > selectedMonth) continue;
+
+      const amt = Number(movement.amount) || 0;
+      if (movement.dest_goal_id === goal.id) {
+        goalTotal += amt;
+      }
+      if (movement.source_goal_id === goal.id) {
+        goalTotal -= amt;
+      }
+    }
+    return sum + goalTotal;
   }, 0);
 
-  // 4. Pronto para Atribuir
+  // d) Pronto = (a) - (b) - (c)
   const readyToAssign = totalAccountsBalance - totalAvailableAccumulated - totalGoalsCurrentValue;
 
   return {
@@ -939,4 +1223,316 @@ export function getFinancialStatusColorClass(
     return mode === 'dark' ? 'text-[#FF4D55]' : 'text-[#EF4444]';
   }
   return mode === 'dark' ? 'text-[#A9B1B1]' : 'text-[#6B7280]';
+}
+
+// =========================================================================
+// FASE 5b: AÇÕES DO PLANEJAMENTO (moveMoney, Planejar, Alocar, Ajustar)
+// =========================================================================
+
+export interface MoveMoneyParams {
+  sourceCat?: number | null;
+  sourceSub?: number | null;
+  destCat?: number | null;
+  destSub?: number | null;
+  sourceGoalId?: number | null;
+  destGoalId?: number | null;
+  month: string; // "YYYY-MM"
+  destMonth?: string; // default = month
+  amount: number;
+  note?: string | null;
+}
+
+export interface MoveMoneyResult {
+  updatedAllocations: BudgetAllocation[];
+  updatedMovements: AllocationMovement[];
+  movement: AllocationMovement;
+}
+
+/**
+ * Função central de movimentação de dinheiro (Fase 5b):
+ * - Origem ou destino envelope: localiza BudgetAllocation (cat, sub, mês); se não existir, cria com planned_value: 0
+ * - Origem/destino null: Pronto para Atribuir
+ * - Cria AllocationMovement com moved_at no dia 2 do mês às 12:00
+ * - Retorna arrays atualizados preservando os objetos originais ({ ...original })
+ */
+export function executeMoveMoneyLogic(
+  params: MoveMoneyParams,
+  currentAllocations: BudgetAllocation[],
+  currentMovements: AllocationMovement[],
+  usedIds: Set<number>
+): MoveMoneyResult {
+  const updatedAllocations = [...currentAllocations];
+  const targetDestMonth = params.destMonth || params.month;
+  let sourceAllocId: number | null = null;
+  let destAllocId: number | null = null;
+
+  // 1. Origem: envelope
+  if (params.sourceCat != null) {
+    const existingSource = updatedAllocations.find(
+      (b) =>
+        Number(b.category_id) === Number(params.sourceCat) &&
+        (params.sourceSub != null
+          ? Number(b.subcategory_id) === Number(params.sourceSub)
+          : b.subcategory_id == null) &&
+        b.month === params.month
+    );
+
+    if (existingSource) {
+      sourceAllocId = Number(existingSource.id);
+    } else {
+      const newAlloc: BudgetAllocation = {
+        id: generateUniqueNumericId(usedIds),
+        category_id: Number(params.sourceCat),
+        subcategory_id: params.sourceSub != null ? Number(params.sourceSub) : null,
+        month: params.month,
+        planned_value: 0,
+      };
+      updatedAllocations.push(newAlloc);
+      sourceAllocId = newAlloc.id;
+    }
+  }
+
+  // 2. Destino: envelope
+  if (params.destCat != null) {
+    const existingDest = updatedAllocations.find(
+      (b) =>
+        Number(b.category_id) === Number(params.destCat) &&
+        (params.destSub != null
+          ? Number(b.subcategory_id) === Number(params.destSub)
+          : b.subcategory_id == null) &&
+        b.month === targetDestMonth
+    );
+
+    if (existingDest) {
+      destAllocId = Number(existingDest.id);
+    } else {
+      const newAlloc: BudgetAllocation = {
+        id: generateUniqueNumericId(usedIds),
+        category_id: Number(params.destCat),
+        subcategory_id: params.destSub != null ? Number(params.destSub) : null,
+        month: targetDestMonth,
+        planned_value: 0,
+      };
+      updatedAllocations.push(newAlloc);
+      destAllocId = newAlloc.id;
+    }
+  }
+
+  // 3. Timestamp do dia 2 do mês às 12:00 local
+  const [yStr, mStr] = params.month.split('-');
+  const ano = parseInt(yStr, 10);
+  const mes = parseInt(mStr, 10);
+  const movedAt = new Date(ano, mes - 1, 2, 12, 0, 0).getTime();
+
+  // 4. Criação do movimento
+  const movement: AllocationMovement = {
+    id: generateUniqueNumericId(usedIds),
+    source_budget_allocation_id: sourceAllocId,
+    source_goal_id: params.sourceGoalId != null ? Number(params.sourceGoalId) : null,
+    dest_budget_allocation_id: destAllocId,
+    dest_goal_id: params.destGoalId != null ? Number(params.destGoalId) : null,
+    amount: Math.abs(params.amount),
+    note: params.note ? String(params.note).trim() : null,
+    moved_at: movedAt,
+  };
+
+  const updatedMovements = [...currentMovements, movement];
+
+  return {
+    updatedAllocations,
+    updatedMovements,
+    movement,
+  };
+}
+
+export interface PlanBudgetParams {
+  categoryId: number;
+  subcategoryId?: number | null;
+  month: string;
+  newPlannedValue: number;
+  repeat?: {
+    interval: number;
+    unit: 'MESES' | 'ANOS';
+    endMode: 'NUNCA' | 'ATE';
+    endMonth?: string;
+  };
+}
+
+/**
+ * Lógica pura para Planejar (Fase 5b):
+ * Define planned_value da BudgetAllocation do mês (cria se não existir).
+ * Se houver repetição, aplica em cada mês gerado por getCustomRecurrenceMonths.
+ */
+export function planBudgetLogic(
+  params: PlanBudgetParams,
+  currentAllocations: BudgetAllocation[],
+  usedIds: Set<number>
+): { updatedAllocations: BudgetAllocation[] } {
+  let monthsList = [params.month];
+  if (params.repeat) {
+    monthsList = getCustomRecurrenceMonths(
+      params.month,
+      params.repeat.interval,
+      params.repeat.unit,
+      params.repeat.endMode,
+      params.repeat.endMonth
+    );
+  }
+
+  let updatedAllocations = [...currentAllocations];
+
+  for (const m of monthsList) {
+    const existingIndex = updatedAllocations.findIndex(
+      (b) =>
+        Number(b.category_id) === Number(params.categoryId) &&
+        (params.subcategoryId != null
+          ? Number(b.subcategory_id) === Number(params.subcategoryId)
+          : b.subcategory_id == null) &&
+        b.month === m
+    );
+
+    if (existingIndex >= 0) {
+      const orig = updatedAllocations[existingIndex];
+      updatedAllocations[existingIndex] = {
+        ...orig,
+        planned_value: Math.max(0, params.newPlannedValue),
+      };
+    } else {
+      const newAlloc: BudgetAllocation = {
+        id: generateUniqueNumericId(usedIds),
+        category_id: Number(params.categoryId),
+        subcategory_id: params.subcategoryId != null ? Number(params.subcategoryId) : null,
+        month: m,
+        planned_value: Math.max(0, params.newPlannedValue),
+      };
+      updatedAllocations.push(newAlloc);
+    }
+  }
+
+  return { updatedAllocations };
+}
+
+export interface AllocateBudgetParams {
+  categoryId?: number | null;
+  subcategoryId?: number | null;
+  goalId?: number | null;
+  month: string;
+  newAllocatedTotal: number;
+  currentAllocatedInMonth: number;
+  repeat?: {
+    interval: number;
+    unit: 'MESES' | 'ANOS';
+    endMode: 'NUNCA' | 'ATE';
+    endMonth?: string;
+  };
+}
+
+/**
+ * Lógica pura para Alocar Dinheiro (Fase 5b):
+ * diff = novo - alocado do mês (sem sobra anterior).
+ * Se diff > 0, Pronto -> subcategoria/meta.
+ * Se diff < 0, subcategoria/meta -> Pronto.
+ * Se houver repetição, calcula diff em cada mês subsequente e gera movimentos correspondentes.
+ */
+export function allocateBudgetLogic(
+  params: AllocateBudgetParams,
+  currentAllocations: BudgetAllocation[],
+  currentMovements: AllocationMovement[],
+  usedIds: Set<number>
+): {
+  updatedAllocations: BudgetAllocation[];
+  updatedMovements: AllocationMovement[];
+} {
+  let updatedAllocations = [...currentAllocations];
+  let updatedMovements = [...currentMovements];
+
+  // Caso 1: Meta
+  if (params.goalId != null) {
+    const diff = params.newAllocatedTotal - params.currentAllocatedInMonth;
+    if (Math.abs(diff) > 0.0001) {
+      const res = executeMoveMoneyLogic(
+        {
+          sourceCat: null,
+          sourceSub: null,
+          destCat: null,
+          destSub: null,
+          sourceGoalId: diff < 0 ? Number(params.goalId) : null,
+          destGoalId: diff > 0 ? Number(params.goalId) : null,
+          month: params.month,
+          amount: Math.abs(diff),
+          note: diff > 0 ? 'Aporte na meta' : 'Retirada da meta',
+        },
+        updatedAllocations,
+        updatedMovements,
+        usedIds
+      );
+      return {
+        updatedAllocations: res.updatedAllocations,
+        updatedMovements: res.updatedMovements,
+      };
+    }
+    return { updatedAllocations, updatedMovements };
+  }
+
+  // Caso 2: Envelope
+  if (params.categoryId != null) {
+    let monthsList = [params.month];
+    if (params.repeat) {
+      monthsList = getCustomRecurrenceMonths(
+        params.month,
+        params.repeat.interval,
+        params.repeat.unit,
+        params.repeat.endMode,
+        params.repeat.endMonth
+      );
+    }
+
+    const isRecurring = monthsList.length > 1;
+
+    for (const m of monthsList) {
+      // Localiza alocação existente no mês m
+      const existingAlloc = updatedAllocations.find(
+        (b) =>
+          Number(b.category_id) === Number(params.categoryId) &&
+          (params.subcategoryId != null
+            ? Number(b.subcategory_id) === Number(params.subcategoryId)
+            : b.subcategory_id == null) &&
+          b.month === m
+      );
+
+      const alocadoInM = existingAlloc
+        ? calculateBudgetAllocationAllocated(existingAlloc.id, updatedMovements)
+        : 0;
+
+      const diff = params.newAllocatedTotal - alocadoInM;
+      if (Math.abs(diff) < 0.0001) continue;
+
+      const note = isRecurring ? 'Alocação recorrente' : 'Alocação manual direta';
+
+      const res = executeMoveMoneyLogic(
+        {
+          sourceCat: diff < 0 ? Number(params.categoryId) : null,
+          sourceSub: diff < 0 ? (params.subcategoryId != null ? Number(params.subcategoryId) : null) : null,
+          destCat: diff > 0 ? Number(params.categoryId) : null,
+          destSub: diff > 0 ? (params.subcategoryId != null ? Number(params.subcategoryId) : null) : null,
+          sourceGoalId: null,
+          destGoalId: null,
+          month: m,
+          amount: Math.abs(diff),
+          note,
+        },
+        updatedAllocations,
+        updatedMovements,
+        usedIds
+      );
+
+      updatedAllocations = res.updatedAllocations;
+      updatedMovements = res.updatedMovements;
+    }
+  }
+
+  return {
+    updatedAllocations,
+    updatedMovements,
+  };
 }

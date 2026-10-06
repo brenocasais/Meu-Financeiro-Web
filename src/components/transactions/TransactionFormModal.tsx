@@ -33,6 +33,8 @@ interface TransactionFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   transactionToEdit?: Transaction | null;
+  initialCategoryId?: number | null;
+  initialSubcategoryId?: number | null;
 }
 
 type TxType = 'DESPESA' | 'RECEITA' | 'TRANSFERENCIA';
@@ -82,6 +84,8 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   isOpen,
   onClose,
   transactionToEdit,
+  initialCategoryId,
+  initialSubcategoryId,
 }) => {
   const { user } = useAuth();
   const { data } = useFinance();
@@ -152,9 +156,9 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
   );
   const isSeriesTx = isRecurringTx || isInstallmentTx;
 
-  const showSeriesBlock = (!isEditing && type !== 'TRANSFERENCIA') || isSeriesTx;
-  const showInstallmentToggle = (!isEditing && type === 'DESPESA') || isInstallmentTx;
-  const showRecurringToggle = (!isEditing && (type === 'DESPESA' || type === 'RECEITA')) || isRecurringTx;
+  const showSeriesBlock = type !== 'TRANSFERENCIA';
+  const showInstallmentToggle = type === 'DESPESA';
+  const showRecurringToggle = type === 'DESPESA' || type === 'RECEITA';
 
   // Lista de contas disponíveis (não arquivadas + conta da transação atual se estiver arquivada)
   const availableAccounts = useMemo(() => {
@@ -303,15 +307,18 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       const secondAcc = availableAccounts[1];
       setToAccountId(secondAcc ? String(secondAcc.id) : '');
 
-      // Categoria padrão: primeira categoria disponível
-      const firstCat = availableCategories[0];
-      const initialCatId = firstCat ? String(firstCat.id) : '';
-      setCategoryId(initialCatId);
+      // Categoria padrão: initialCategoryId se fornecido, senão primeira categoria disponível
+      const targetCatId = initialCategoryId != null
+        ? String(initialCategoryId)
+        : (availableCategories[0] ? String(availableCategories[0].id) : '');
+      setCategoryId(targetCatId);
 
-      // Subcategoria padrão: primeira subcategoria da categoria
-      if (initialCatId) {
+      // Subcategoria padrão: initialSubcategoryId se fornecido, senão primeira subcategoria da categoria
+      if (initialSubcategoryId != null) {
+        setSubcategoryId(String(initialSubcategoryId));
+      } else if (targetCatId) {
         const firstSub = data.subcategories.find(
-          (sub) => String(sub.category_id) === initialCatId && !sub.archived
+          (sub) => String(sub.category_id) === targetCatId && !sub.archived
         );
         setSubcategoryId(firstSub ? String(firstSub.id) : '');
       } else {
@@ -321,7 +328,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       // Data padrão: hoje em formato brasileiro DD/MM/AAAA
       setDateBrl(getTodayBrl());
     }
-  }, [isOpen, transactionToEdit, availableAccounts, availableCategories, data.subcategories, data.recurrence_rules, data.installment_plans]);
+  }, [isOpen, transactionToEdit, initialCategoryId, initialSubcategoryId, availableAccounts, availableCategories, data.subcategories, data.recurrence_rules, data.installment_plans]);
 
   // Ao trocar o tipo de transação
   const handleTypeSelect = (newType: TxType) => {
@@ -520,7 +527,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     }
 
     // Validações específicas de parcelamento e recorrência
-    if ((!isEditing && type === 'DESPESA' && isInstallment) || (isEditing && isInstallmentTx)) {
+    if (type === 'DESPESA' && isInstallment) {
       const n = parseInt(installmentsCountStr, 10);
       if (isNaN(n) || n < 2) {
         setFormError('Insira um número de parcelas válido maior ou igual a 2.');
@@ -528,7 +535,7 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       }
     }
 
-    if (((!isEditing && (type === 'DESPESA' || type === 'RECEITA')) || (isEditing && isRecurringTx)) && isRecurring) {
+    if ((type === 'DESPESA' || type === 'RECEITA') && isRecurring) {
       const interval = parseInt(String(recurrenceInterval), 10);
       if (isNaN(interval) || interval < 1) {
         setFormError('O intervalo deve ser um número inteiro maior ou igual a 1.');
@@ -543,8 +550,8 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
       }
     }
 
-    // Fase 4e: Ao editar uma transação que faz parte de série, abre o diálogo "Opções de Edição"
-    if (isEditing && isSeriesTx) {
+    // Fase 4e: Ao editar uma transação que faz parte de série e permanece como série, abre o diálogo "Opções de Edição"
+    if (isEditing && ((isRecurringTx && isRecurring) || (isInstallmentTx && isInstallment))) {
       setShowEditOptionsModal(true);
       return;
     }
@@ -552,8 +559,8 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
     try {
       setSaving(true);
 
-      if (!isEditing && type === 'DESPESA' && isInstallment) {
-        // === 3. PARCELAMENTO: Criar InstallmentPlan e N transações numa ÚNICA chamada updateDoc atômica ===
+      if (type === 'DESPESA' && isInstallment && !isInstallmentTx) {
+        // === PARCELAMENTO: Criar InstallmentPlan e N transações numa ÚNICA chamada updateDoc atômica ===
         const n = parseInt(installmentsCountStr, 10);
         const usedIds = collectAllExistingNumericIds(data);
         const firstMonth = isoDate.slice(0, 7);
@@ -570,15 +577,19 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
           usedIds,
         });
 
+        const txsBase = isEditing && transactionToEdit
+          ? data.transactions.filter((t) => Number(t.id) !== Number(transactionToEdit.id))
+          : data.transactions;
+
         await createInstallmentPlanWithTransactions(
           user.uid,
           plan,
           newTxs,
           data.installment_plans || [],
-          data.transactions
+          txsBase
         );
-      } else if (!isEditing && (type === 'DESPESA' || type === 'RECEITA') && isRecurring) {
-        // === 4. RECORRÊNCIA: Criar RecurrenceRule e materializar transações (39 meses) numa ÚNICA updateDoc ===
+      } else if ((type === 'DESPESA' || type === 'RECEITA') && isRecurring && !isRecurringTx) {
+        // === RECORRÊNCIA: Criar RecurrenceRule e materializar transações (39 meses) numa ÚNICA updateDoc ===
         const usedIds = collectAllExistingNumericIds(data);
         const { rule, transactions: newTxs } = generateRecurrenceTransactions({
           accountId: Number(accountId),
@@ -594,12 +605,16 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
           usedIds,
         });
 
+        const txsBase = isEditing && transactionToEdit
+          ? data.transactions.filter((t) => Number(t.id) !== Number(transactionToEdit.id))
+          : data.transactions;
+
         await createRecurrenceRuleWithTransactions(
           user.uid,
           rule,
           newTxs,
           data.recurrence_rules || [],
-          data.transactions
+          txsBase
         );
       } else {
         // === Transação Padrão ou Edição de Transação Comum ===
@@ -1408,14 +1423,13 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                         role="switch"
                         aria-checked={isInstallment}
                         onClick={() => {
-                          if (isInstallmentTx) return;
                           const next = !isInstallment;
                           setIsInstallment(next);
                           if (next) setIsRecurring(false);
                         }}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                           isInstallment ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
-                        } ${isInstallmentTx ? 'cursor-default opacity-90' : ''}`}
+                        }`}
                       >
                         <span
                           className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
@@ -1482,14 +1496,13 @@ export const TransactionFormModal: React.FC<TransactionFormModalProps> = ({
                         role="switch"
                         aria-checked={isRecurring}
                         onClick={() => {
-                          if (isRecurringTx) return;
                           const next = !isRecurring;
                           setIsRecurring(next);
                           if (next) setIsInstallment(false);
                         }}
                         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
                           isRecurring ? 'bg-[#22A45D] dark:bg-[#39D47A]' : 'bg-gray-300 dark:bg-gray-700'
-                        } ${isRecurringTx ? 'cursor-default opacity-90' : ''}`}
+                        }`}
                       >
                         <span
                           className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${

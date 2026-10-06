@@ -1,7 +1,7 @@
 import { doc, onSnapshot, getDoc, setDoc, updateDoc, arrayUnion, DocumentReference, Unsubscribe } from 'firebase/firestore';
 import { db } from './config';
-import { UserFirestoreData, Transaction, Category, Subcategory, InstallmentPlan, RecurrenceRule } from '../types/finance';
-import { generateNumericId } from '../lib/financeLogic';
+import { UserFirestoreData, Transaction, Category, Subcategory, InstallmentPlan, RecurrenceRule, BudgetAllocation, AllocationMovement } from '../types/finance';
+import { generateNumericId, MoveMoneyParams, executeMoveMoneyLogic, collectAllExistingNumericIds } from '../lib/financeLogic';
 
 /**
  * Serviço do Firestore para o "Meu Financeiro"
@@ -601,3 +601,94 @@ export async function createSubcategory(
   }
   return newSub;
 }
+
+/**
+ * Salva atomicamente BudgetAllocations e AllocationMovements numa ÚNICA chamada updateDoc (Fase 5b).
+ */
+export async function saveBudgetAllocationsAndMovements(
+  userId: string,
+  updatedAllocations: BudgetAllocation[],
+  updatedMovements: AllocationMovement[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedAllocations = sanitizeForFirestore(updatedAllocations);
+  const sanitizedMovements = sanitizeForFirestore(updatedMovements);
+
+  try {
+    await updateDoc(docRef, {
+      budget_allocations: sanitizedAllocations,
+      allocation_movements: sanitizedMovements,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em saveBudgetAllocationsAndMovements, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          budget_allocations: sanitizedAllocations,
+          allocation_movements: sanitizedMovements,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao gravar alocações e movimentos: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+}
+
+/**
+ * Salva atomicamente BudgetAllocations numa ÚNICA chamada updateDoc (ex: Planejar).
+ */
+export async function saveBudgetAllocations(
+  userId: string,
+  updatedAllocations: BudgetAllocation[]
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitizedAllocations = sanitizeForFirestore(updatedAllocations);
+
+  try {
+    await updateDoc(docRef, {
+      budget_allocations: sanitizedAllocations,
+    });
+  } catch (firstErr: any) {
+    console.warn('[Firestore] updateDoc falhou em saveBudgetAllocations, tentando setDoc merge...', firstErr);
+    try {
+      await setDoc(
+        docRef,
+        {
+          budget_allocations: sanitizedAllocations,
+        },
+        { merge: true }
+      );
+    } catch (fallbackErr: any) {
+      console.error('[Firestore] setDoc fallback também falhou:', fallbackErr);
+      throw new Error(
+        `Falha no Firestore ao gravar alocações orçamentárias: ${fallbackErr?.message || fallbackErr?.code || String(fallbackErr)}`
+      );
+    }
+  }
+}
+
+/**
+ * Função central moveMoney (Fase 5b) que executa a lógica pura e persiste atomicamente no Firestore numa única updateDoc.
+ */
+export async function moveMoney(
+  userId: string,
+  params: MoveMoneyParams,
+  currentAllocations: BudgetAllocation[],
+  currentMovements: AllocationMovement[],
+  allData: Partial<UserFirestoreData>
+): Promise<{
+  updatedAllocations: BudgetAllocation[];
+  updatedMovements: AllocationMovement[];
+  movement: AllocationMovement;
+}> {
+  const usedIds = collectAllExistingNumericIds(allData);
+  const result = executeMoveMoneyLogic(params, currentAllocations, currentMovements, usedIds);
+  await saveBudgetAllocationsAndMovements(userId, result.updatedAllocations, result.updatedMovements);
+  return result;
+}
+
