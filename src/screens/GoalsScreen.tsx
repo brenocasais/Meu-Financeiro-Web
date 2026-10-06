@@ -495,21 +495,27 @@ export const GoalsScreen: React.FC = () => {
     color: number;
   }) => {
     if (!user) return;
-    const usedIds = collectAllExistingNumericIds(data);
-    const newId = generateUniqueNumericId(usedIds);
-    const newGoal: Goal = {
-      id: newId,
-      name: goalData.name,
-      target_value: goalData.target_value,
-      start_date: goalData.start_date,
-      deadline: goalData.deadline,
-      color: goalData.color,
-      archived: false,
-      is_paused: false,
-    };
-    const updatedGoals = [...(data.goals || []), newGoal];
-    await saveGoals(user.uid, updatedGoals);
-    showNotice(`Meta "${newGoal.name}" criada com sucesso! 🎯`);
+    try {
+      const usedIds = collectAllExistingNumericIds(data);
+      const newId = generateUniqueNumericId(usedIds);
+      const newGoal: Goal = {
+        id: newId,
+        name: goalData.name,
+        target_value: goalData.target_value,
+        start_date: goalData.start_date,
+        deadline: goalData.deadline,
+        color: goalData.color,
+        archived: false,
+        is_paused: false,
+      };
+      const updatedGoals = [...(data.goals || []), newGoal];
+      await saveGoals(user.uid, updatedGoals);
+      showNotice(`Meta "${newGoal.name}" criada com sucesso! 🎯`);
+    } catch (err) {
+      console.error('Erro ao salvar nova meta:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
+      throw err;
+    }
   };
 
   // 2. Salvar Meta Editada
@@ -521,44 +527,60 @@ export const GoalsScreen: React.FC = () => {
     color: number;
   }) => {
     if (!user || !editingGoal) return;
-    const updatedGoals = (data.goals || []).map((g) =>
-      Number(g.id) === Number(editingGoal.id)
-        ? {
-            ...g,
-            name: goalData.name,
-            target_value: goalData.target_value,
-            start_date: goalData.start_date,
-            deadline: goalData.deadline,
-            color: goalData.color,
-          }
-        : g
-    );
-    await saveGoals(user.uid, updatedGoals);
-    showNotice(`Meta "${goalData.name}" atualizada com sucesso!`);
+    try {
+      const updatedGoals = (data.goals || []).map((g) =>
+        Number(g.id) === Number(editingGoal.id)
+          ? {
+              ...g,
+              name: goalData.name,
+              target_value: goalData.target_value,
+              start_date: goalData.start_date,
+              deadline: goalData.deadline,
+              color: goalData.color,
+            }
+          : g
+      );
+      await saveGoals(user.uid, updatedGoals);
+      showNotice(`Meta "${goalData.name}" atualizada com sucesso!`);
+    } catch (err) {
+      console.error('Erro ao salvar meta editada:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
+      throw err;
+    }
   };
 
   // 3. Pausar / Reativar Meta
   const handleTogglePause = async () => {
     if (!user || !selectedGoal) return;
-    const nextPaused = !selectedGoal.is_paused;
-    const updatedGoals = (data.goals || []).map((g) =>
-      Number(g.id) === Number(selectedGoal.id) ? { ...g, is_paused: nextPaused } : g
-    );
-    await saveGoals(user.uid, updatedGoals);
-    showNotice(nextPaused ? 'Meta pausada' : 'Meta reativada');
+    try {
+      const nextPaused = !selectedGoal.is_paused;
+      const updatedGoals = (data.goals || []).map((g) =>
+        Number(g.id) === Number(selectedGoal.id) ? { ...g, is_paused: nextPaused } : g
+      );
+      await saveGoals(user.uid, updatedGoals);
+      showNotice(nextPaused ? 'Meta pausada' : 'Meta reativada');
+    } catch (err) {
+      console.error('Erro ao pausar/reativar meta:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
+    }
   };
 
   // 4. Arquivar / Desarquivar Meta do Detalhe
   const handleToggleArchive = async () => {
     if (!user || !selectedGoal) return;
-    const nextArchived = !selectedGoal.archived;
-    const updatedGoals = (data.goals || []).map((g) =>
-      Number(g.id) === Number(selectedGoal.id) ? { ...g, archived: nextArchived } : g
-    );
-    await saveGoals(user.uid, updatedGoals);
-    showNotice(nextArchived ? 'Meta arquivada' : 'Meta desarquivada');
-    if (nextArchived) {
-      setSelectedGoalId(null);
+    try {
+      const nextArchived = !selectedGoal.archived;
+      const updatedGoals = (data.goals || []).map((g) =>
+        Number(g.id) === Number(selectedGoal.id) ? { ...g, archived: nextArchived } : g
+      );
+      await saveGoals(user.uid, updatedGoals);
+      showNotice(nextArchived ? 'Meta arquivada' : 'Meta desarquivada');
+      if (nextArchived) {
+        setSelectedGoalId(null);
+      }
+    } catch (err) {
+      console.error('Erro ao arquivar/desarquivar meta:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
     }
   };
 
@@ -566,23 +588,33 @@ export const GoalsScreen: React.FC = () => {
   const handleUnarchiveGoal = async (goalId: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user) return;
-    const updatedGoals = (data.goals || []).map((g) =>
-      Number(g.id) === Number(goalId) ? { ...g, archived: false } : g
-    );
-    await saveGoals(user.uid, updatedGoals);
-    showNotice('Meta desarquivada');
+    try {
+      const updatedGoals = (data.goals || []).map((g) =>
+        Number(g.id) === Number(goalId) ? { ...g, archived: false } : g
+      );
+      await saveGoals(user.uid, updatedGoals);
+      showNotice('Meta desarquivada');
+    } catch (err) {
+      console.error('Erro ao desarquivar meta:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
+    }
   };
 
   // 6. Confirmar Exclusão de Meta
   const handleConfirmDeleteGoal = async () => {
     if (!user || !selectedGoal) return;
-    const updatedGoals = (data.goals || []).filter(
-      (g) => Number(g.id) !== Number(selectedGoal.id)
-    );
-    await saveGoals(user.uid, updatedGoals);
-    setSelectedGoalId(null);
-    setIsDeleteGoalModalOpen(false);
-    showNotice('Meta excluída com sucesso.');
+    try {
+      const updatedGoals = (data.goals || []).filter(
+        (g) => Number(g.id) !== Number(selectedGoal.id)
+      );
+      await saveGoals(user.uid, updatedGoals);
+      setSelectedGoalId(null);
+      setIsDeleteGoalModalOpen(false);
+      showNotice('Meta excluída com sucesso.');
+    } catch (err) {
+      console.error('Erro ao excluir meta:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
+    }
   };
 
   // 7. Salvar Movimentação Editada
@@ -592,28 +624,39 @@ export const GoalsScreen: React.FC = () => {
     note: string | null
   ) => {
     if (!user) return;
-    const updatedMovements = (data.allocation_movements || []).map((m) =>
-      Number(m.id) === Number(movementId)
-        ? {
-            ...m,
-            amount,
-            note,
-          }
-        : m
-    );
-    await saveAllocationMovementsOnly(user.uid, updatedMovements);
-    showNotice('Movimentação atualizada com sucesso.');
+    try {
+      const updatedMovements = (data.allocation_movements || []).map((m) =>
+        Number(m.id) === Number(movementId)
+          ? {
+              ...m,
+              amount,
+              note,
+            }
+          : m
+      );
+      await saveAllocationMovementsOnly(user.uid, updatedMovements);
+      showNotice('Movimentação atualizada com sucesso.');
+    } catch (err) {
+      console.error('Erro ao salvar movimentação editada:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
+      throw err;
+    }
   };
 
   // 8. Confirmar Exclusão de Movimentação
   const handleConfirmDeleteMovement = async () => {
     if (!user || !movementToDelete) return;
-    const updatedMovements = (data.allocation_movements || []).filter(
-      (m) => Number(m.id) !== Number(movementToDelete.id)
-    );
-    await saveAllocationMovementsOnly(user.uid, updatedMovements);
-    setMovementToDelete(null);
-    showNotice('Movimentação excluída com sucesso.');
+    try {
+      const updatedMovements = (data.allocation_movements || []).filter(
+        (m) => Number(m.id) !== Number(movementToDelete.id)
+      );
+      await saveAllocationMovementsOnly(user.uid, updatedMovements);
+      setMovementToDelete(null);
+      showNotice('Movimentação excluída com sucesso.');
+    } catch (err) {
+      console.error('Erro ao excluir movimentação:', err);
+      showNotice('Não foi possível salvar. Tente novamente.');
+    }
   };
 
   // =========================================================================
