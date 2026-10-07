@@ -9,7 +9,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onOpenSettings, isSettingsOpen }) => {
-  const { theme, toggleTheme } = useTheme();
+  const { isDark, toggleTheme } = useTheme();
 
   return (
     <header
@@ -44,10 +44,10 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings, isSettingsOpen }
             id="btn-toggle-theme"
             onClick={toggleTheme}
             className="p-2 rounded-xl text-[#6B7280] dark:text-[#A9B1B1] hover:text-[#111827] dark:hover:text-[#F5F7F7] hover:bg-black/5 dark:hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
-            aria-label={theme === 'dark' ? 'Ativar modo claro' : 'Ativar modo escuro'}
-            title={theme === 'dark' ? 'Mudar para modo claro' : 'Mudar para modo escuro'}
+            aria-label={isDark ? 'Ativar modo claro' : 'Ativar modo escuro'}
+            title={isDark ? 'Mudar para modo claro' : 'Mudar para modo escuro'}
           >
-            {theme === 'dark' ? (
+            {isDark ? (
               <Sun className="w-4 h-4 text-[#FF9F1C]" />
             ) : (
               <Moon className="w-4 h-4 text-[#6B7280]" />

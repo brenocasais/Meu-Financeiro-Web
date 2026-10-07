@@ -20,7 +20,7 @@ interface AuthContextType {
   loginWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   updateUserProfile: (displayName: string) => Promise<void>;
-  refreshUser: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -68,6 +68,7 @@ export function getAuthErrorMessage(error: any): string {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [, setAuthVersion] = useState<number>(0);
 
   useEffect(() => {
     // Escuta o estado de autenticação do Firebase
@@ -112,15 +113,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshUser = async (): Promise<void> => {
+    if (auth.currentUser) {
+      await auth.currentUser.reload();
+      setUser(auth.currentUser);
+      setAuthVersion((prev) => prev + 1);
+    } else {
+      setUser(null);
+    }
+  };
+
   const updateUserProfile = async (displayName: string): Promise<void> => {
     if (!auth.currentUser) return;
     await updateProfile(auth.currentUser, { displayName });
-    // Atualiza o estado local para refletir imediatamente na UI
-    setUser(auth.currentUser ? ({ ...auth.currentUser } as User) : null);
-  };
-
-  const refreshUser = (): void => {
-    setUser(auth.currentUser ? ({ ...auth.currentUser } as User) : null);
+    await refreshUser();
   };
 
   return (

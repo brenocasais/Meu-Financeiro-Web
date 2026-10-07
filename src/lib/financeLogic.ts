@@ -1507,3 +1507,5 @@ export function allocateBudgetLogic(
     updatedMovements,
   };
 }
+
+export { parseBRLInput } from './parseBRLInput';

@@ -930,8 +930,7 @@ export interface PlanningScreenProps {
 export const PlanningScreen: React.FC<PlanningScreenProps> = ({ onOpenTransaction }) => {
   const { user } = useAuth();
   const { data, loading, selectedMonth, hideValues } = useFinance();
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
 
   // Estados locais da tela
   const [searchQuery, setSearchQuery] = useState('');

@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { Account, AccountType } from '../../types/finance';
 import { generateUniqueNumericId, collectAllExistingNumericIds } from '../../lib/financeLogic';
+import { parseBRLInput } from '../../lib/parseBRLInput';
 
 interface AccountFormModalProps {
   isOpen: boolean;
@@ -49,12 +50,6 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
 
   if (!isOpen) return null;
 
-  const parseBalanceNumber = (str: string): number => {
-    const clean = str.trim().replace(/\./g, '').replace(',', '.');
-    const num = parseFloat(clean);
-    return isNaN(num) ? 0 : num;
-  };
-
   const handleSave = async () => {
     if (!name.trim() || !user) return;
 
@@ -62,7 +57,7 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const initial_balance = parseBalanceNumber(balanceStr);
+      const initial_balance = parseBRLInput(balanceStr);
       const currentAccounts = data.accounts || [];
 
       let updatedAccounts: Account[];

@@ -5,6 +5,7 @@ import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { RecurrenceRule } from '../../types/finance';
+import { parseBRLInput } from '../../lib/parseBRLInput';
 
 interface EditRecurringRuleModalProps {
   isOpen: boolean;
@@ -40,12 +41,6 @@ export const EditRecurringRuleModal: React.FC<EditRecurringRuleModalProps> = ({
 
   if (!isOpen || !ruleToEdit) return null;
 
-  const parseValue = (str: string): number => {
-    const clean = str.trim().replace(/\./g, '').replace(',', '.');
-    const num = parseFloat(clean);
-    return isNaN(num) ? 0 : num;
-  };
-
   const validateEndMonth = (val: string, startMonthStr: string): boolean => {
     if (!val.trim()) return true; // Vazio é válido (indefinido)
     const regex = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -66,7 +61,7 @@ export const EditRecurringRuleModal: React.FC<EditRecurringRuleModalProps> = ({
       return;
     }
 
-    const valNum = parseValue(valueStr);
+    const valNum = parseBRLInput(valueStr);
     if (valNum <= 0) {
       setErrorMessage('O valor deve ser maior que zero.');
       return;

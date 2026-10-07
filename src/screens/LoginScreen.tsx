@@ -5,7 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 
 export const LoginScreen: React.FC = () => {
   const { loginWithEmail, registerWithEmail, loginWithGoogle } = useAuth();
-  const { theme } = useTheme();
+  const { isDark } = useTheme();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
