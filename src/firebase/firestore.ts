@@ -63,33 +63,37 @@ export function sanitizeForFirestore<T>(data: T): T {
 export async function ensureUserDoc(userId: string): Promise<void> {
   if (!userId) return;
   const docRef = getUserDocRef(userId);
+  const initialBase = {
+    accounts: [],
+    categories: [],
+    subcategories: [],
+    transactions: [],
+    budget_allocations: [],
+    allocation_movements: [],
+    goals: [],
+    installment_plans: [],
+    recurrence_rules: [],
+  };
   try {
     const snap = await getDoc(docRef);
     if (!snap.exists()) {
-      await setDoc(
-        docRef,
-        {
-          accounts: [],
-          categories: [],
-          subcategories: [],
-          transactions: [],
-          budget_allocations: [],
-          allocation_movements: [],
-          goals: [],
-          installment_plans: [],
-          recurrence_rules: [],
-        },
-        { merge: true }
-      );
+      await setDoc(docRef, initialBase, { merge: true });
     }
   } catch (err) {
-    console.warn('[Firestore] Falha ao verificar/inicializar documento do usuário:', err);
+    console.warn('[Firestore] Falha ao verificar documento do usuário, tentando setDoc merge direto:', err);
+    try {
+      await setDoc(docRef, initialBase, { merge: true });
+    } catch (fallbackErr) {
+      console.warn('[Firestore] Falha no setDoc merge direto:', fallbackErr);
+    }
   }
 }
 
 /**
  * Atualiza campos no documento /users/{userId} com fallback resiliente para setDoc merge
  * caso o documento ainda não exista previamente no Firestore.
+ * Quando o documento for novo, garante a estrutura completa dos 9 arrays para atender
+ * as regras de validação do Firestore compartilhadas com o app Android.
  */
 export async function updateUserDocSafe(
   userId: string,
@@ -97,10 +101,28 @@ export async function updateUserDocSafe(
 ): Promise<void> {
   const docRef = getUserDocRef(userId);
   const sanitized = sanitizeForFirestore(dataToUpdate);
+  const initialBase = {
+    accounts: [],
+    categories: [],
+    subcategories: [],
+    transactions: [],
+    budget_allocations: [],
+    allocation_movements: [],
+    goals: [],
+    installment_plans: [],
+    recurrence_rules: [],
+  };
+
   try {
     await updateDoc(docRef, sanitized);
   } catch (err: any) {
-    await setDoc(docRef, sanitized, { merge: true });
+    console.warn('[Firestore] updateDoc falhou em updateUserDocSafe, tentando setDoc merge com estrutura base...', err);
+    try {
+      await setDoc(docRef, { ...initialBase, ...sanitized }, { merge: true });
+    } catch (setErr: any) {
+      console.error('[Firestore] setDoc merge com estrutura base também falhou:', setErr);
+      throw setErr;
+    }
   }
 }
 
