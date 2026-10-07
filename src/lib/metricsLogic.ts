@@ -764,3 +764,354 @@ export function calculateGoalsProgressTimeline(
 
   return { seriesList, monthsList: months };
 }
+
+/**
+ * =========================================================================
+ * FASE 7c: SEÇÕES 12, 13 E 14
+ * =========================================================================
+ */
+
+export interface BillsProjectionMonthItem {
+  month: string;
+  label: string;
+  parcelas: number;
+  recorrentes: number;
+  total: number;
+}
+
+/**
+ * 12. "Projeção de Faturas e Contas Fixas 💳":
+ * Previsão consolidada para os próximos 3 meses seguintes ao mês M.
+ * Parcelas = soma das DESPESAS com installment_plan_id != null.
+ * Recorrentes = soma das DESPESAS com recurrence_rule_id != null e installment_plan_id == null.
+ */
+export function calculateBillsProjection(
+  transactions: Transaction[],
+  currentMonth: string
+): BillsProjectionMonthItem[] {
+  const next3Months = [
+    shiftMonth(currentMonth, 1),
+    shiftMonth(currentMonth, 2),
+    shiftMonth(currentMonth, 3),
+  ];
+
+  return next3Months.map((m) => {
+    let parcelas = 0;
+    let recorrentes = 0;
+
+    transactions.forEach((t) => {
+      if (!t.date || t.date.slice(0, 7) !== m) return;
+      if (t.type !== 'DESPESA') return;
+      const val = Number(t.value) || 0;
+      if (t.installment_plan_id != null) {
+        parcelas += val;
+      } else if (t.recurrence_rule_id != null) {
+        recorrentes += val;
+      }
+    });
+
+    const total = parcelas + recorrentes;
+    return {
+      month: m,
+      label: formatShortMonthYear(m),
+      parcelas,
+      recorrentes,
+      total,
+    };
+  });
+}
+
+export function formatFullMonthYear(mStr: string): string {
+  if (!mStr || !mStr.includes('-')) return '';
+  const [y, m] = mStr.split('-');
+  const idx = parseInt(m, 10) - 1;
+  const monthLabel = MONTH_NAMES_FULL[idx] || m;
+  return `${monthLabel}/${y}`;
+}
+
+export interface WhatIfSimulationResult {
+  mediaCategoria: number;
+  economiaMensal: number;
+  saldoMeta: number;
+  alvoMeta: number;
+  faltante: number;
+  novoSaldo: number;
+  novoFaltante: number;
+  mesesParaAtingir: number;
+  dataEstimada: string;
+  resultadoTexto: string;
+  impactoPercentStr: string; // "+X,X%"
+  status: 'NO_SELECTION' | 'GOAL_REACHED' | 'SIMULATION_ACTIVE';
+  goalName: string;
+  categoryName: string;
+}
+
+/**
+ * 13. "Simulador Financeiro 'What-If' 🧠":
+ * Calcula a economia mensal estimada e o impacto de aceleração na meta selecionada.
+ */
+export function calculateWhatIfSimulation(
+  categoryId: number | null | undefined,
+  goalId: number | null | undefined,
+  reductionPercent: number,
+  transactions: Transaction[],
+  categories: Category[],
+  goals: Goal[],
+  allocationMovements: AllocationMovement[],
+  currentMonth: string
+): WhatIfSimulationResult {
+  const selectedGoal = goals.find((g) => Number(g.id) === Number(goalId));
+  const selectedCategory = categories.find((c) => Number(c.id) === Number(categoryId));
+  const goalName = selectedGoal ? selectedGoal.name : '';
+  const categoryName = selectedCategory ? selectedCategory.name : '';
+
+  if (!selectedGoal || categoryId == null || reductionPercent <= 0) {
+    return {
+      mediaCategoria: 0,
+      economiaMensal: 0,
+      saldoMeta: 0,
+      alvoMeta: 0,
+      faltante: 0,
+      novoSaldo: 0,
+      novoFaltante: 0,
+      mesesParaAtingir: 0,
+      dataEstimada: '',
+      resultadoTexto: 'Selecione uma meta e uma categoria com gastos históricos para simular.',
+      impactoPercentStr: '+0,0%',
+      status: 'NO_SELECTION',
+      goalName,
+      categoryName,
+    };
+  }
+
+  // Despesas da categoria no histórico e quantidade de meses distintos com despesas
+  let totalDespesasCat = 0;
+  const distinctMonths = new Set<string>();
+
+  transactions.forEach((t) => {
+    if (t.type === 'DESPESA' && Number(t.category_id) === Number(categoryId)) {
+      totalDespesasCat += Number(t.value) || 0;
+      if (t.date && t.date.length >= 7) {
+        distinctMonths.add(t.date.slice(0, 7));
+      }
+    }
+  });
+
+  const distinctMonthsCount = Math.max(1, distinctMonths.size);
+  const mediaCategoria = totalDespesasCat / distinctMonthsCount;
+  const economiaMensal = mediaCategoria * (reductionPercent / 100);
+
+  // Saldo da meta sem filtro de mês (calculateGoalCurrentValue)
+  let saldoMeta = 0;
+  allocationMovements.forEach((m) => {
+    const amt = Number(m.amount) || 0;
+    if (Number(m.dest_goal_id) === Number(goalId)) saldoMeta += amt;
+    if (Number(m.source_goal_id) === Number(goalId)) saldoMeta -= amt;
+  });
+
+  const alvoMeta = Number(selectedGoal.target_value) || 0;
+  const faltante = Math.max(alvoMeta - saldoMeta, 0);
+
+  if (economiaMensal <= 0) {
+    return {
+      mediaCategoria: 0,
+      economiaMensal: 0,
+      saldoMeta,
+      alvoMeta,
+      faltante,
+      novoSaldo: saldoMeta,
+      novoFaltante: faltante,
+      mesesParaAtingir: 0,
+      dataEstimada: '',
+      resultadoTexto: 'Selecione uma meta e uma categoria com gastos históricos para simular.',
+      impactoPercentStr: '+0,0%',
+      status: 'NO_SELECTION',
+      goalName,
+      categoryName,
+    };
+  }
+
+  if (faltante === 0) {
+    return {
+      mediaCategoria,
+      economiaMensal,
+      saldoMeta,
+      alvoMeta,
+      faltante: 0,
+      novoSaldo: saldoMeta + economiaMensal,
+      novoFaltante: 0,
+      mesesParaAtingir: 0,
+      dataEstimada: '',
+      resultadoTexto: `Sua meta '${goalName}' já atingiu o valor alvo!`,
+      impactoPercentStr: '+0,0%',
+      status: 'GOAL_REACHED',
+      goalName,
+      categoryName,
+    };
+  }
+
+  const mesesParaAtingir = Math.ceil(faltante / economiaMensal);
+  const dataEstimada = formatFullMonthYear(shiftMonth(currentMonth, mesesParaAtingir));
+  const mesesStr = mesesParaAtingir === 1 ? '1 mês' : `${mesesParaAtingir} meses`;
+  const formattedEconomia = new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(economiaMensal);
+
+  const resultadoTexto = `Economizando ${formattedEconomia}/mês em ${categoryName}, você atinge sua meta '${goalName}' em aproximadamente ${mesesStr} (${dataEstimada}).`;
+
+  const novoSaldo = saldoMeta + economiaMensal;
+  const novoFaltante = Math.max(alvoMeta - novoSaldo, 0);
+  const impacto = saldoMeta > 0 ? (economiaMensal / saldoMeta) * 100 : 100;
+  const impactoPercentStr = `+${impacto.toFixed(1).replace('.', ',')}%`;
+
+  return {
+    mediaCategoria,
+    economiaMensal,
+    saldoMeta,
+    alvoMeta,
+    faltante,
+    novoSaldo,
+    novoFaltante,
+    mesesParaAtingir,
+    dataEstimada,
+    resultadoTexto,
+    impactoPercentStr,
+    status: 'SIMULATION_ACTIVE',
+    goalName,
+    categoryName,
+  };
+}
+
+export type MovementType =
+  | 'META_APORTE'
+  | 'META_RETIRADA'
+  | 'ENVELOPE_TRANSFER'
+  | 'PLANNING_ADJUST';
+
+export interface AuditMovementItem {
+  id: number;
+  movedAt: number;
+  formattedDateTime: string;
+  type: MovementType;
+  typeLabel: string;
+  amount: number;
+  originLabel: string;
+  destLabel: string;
+  note: string | null;
+}
+
+export function formatDateTime(ms: number | string): string {
+  const d = new Date(Number(ms));
+  if (isNaN(d.getTime())) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
+}
+
+export function resolveAuditEntityLabel(
+  allocId: number | null | undefined,
+  goalId: number | null | undefined,
+  allocMap: Map<number, BudgetAllocation>,
+  catMap: Map<number, Category>,
+  subcatMap: Map<number, Subcategory>,
+  goalMap: Map<number, Goal>
+): string {
+  if (goalId != null) {
+    const g = goalMap.get(Number(goalId));
+    return g ? g.name : 'Meta';
+  }
+  if (allocId == null) {
+    return 'Pronto para Atribuir';
+  }
+  const alloc = allocMap.get(Number(allocId));
+  if (!alloc) {
+    return 'Envelope';
+  }
+  const cat = catMap.get(Number(alloc.category_id));
+  const catName = cat ? cat.name : 'Envelope';
+  if (alloc.subcategory_id != null) {
+    const sub = subcatMap.get(Number(alloc.subcategory_id));
+    const subName = sub ? sub.name : 'Subcategoria';
+    return `${catName} › ${subName}`;
+  }
+  return catName;
+}
+
+/**
+ * 14. "Histórico Geral de Movimentações 📜":
+ * Auditoria completa de transferências de envelopes, aportes e retiradas de metas.
+ * Ordenado do mais recente para o mais antigo.
+ */
+export function getAuditMovements(
+  allocationMovements: AllocationMovement[],
+  budgetAllocations: BudgetAllocation[],
+  categories: Category[],
+  subcategories: Subcategory[],
+  goals: Goal[]
+): AuditMovementItem[] {
+  const allocMap = new Map<number, BudgetAllocation>();
+  budgetAllocations.forEach((b) => allocMap.set(Number(b.id), b));
+
+  const catMap = new Map<number, Category>();
+  categories.forEach((c) => catMap.set(Number(c.id), c));
+
+  const subcatMap = new Map<number, Subcategory>();
+  subcategories.forEach((s) => subcatMap.set(Number(s.id), s));
+
+  const goalMap = new Map<number, Goal>();
+  goals.forEach((g) => goalMap.set(Number(g.id), g));
+
+  const list = [...allocationMovements];
+  // Mais recente ao mais antigo
+  list.sort((a, b) => (Number(b.moved_at) || 0) - (Number(a.moved_at) || 0));
+
+  return list.map((m) => {
+    let type: MovementType = 'PLANNING_ADJUST';
+    let typeLabel = 'Ajuste de Planejamento ⚡';
+
+    if (m.dest_goal_id != null) {
+      type = 'META_APORTE';
+      typeLabel = 'Meta: Aporte 🎯';
+    } else if (m.source_goal_id != null) {
+      type = 'META_RETIRADA';
+      typeLabel = 'Meta: Retirada 📤';
+    } else if (m.source_budget_allocation_id != null && m.dest_budget_allocation_id != null) {
+      type = 'ENVELOPE_TRANSFER';
+      typeLabel = 'Transferência de Envelope 🔄';
+    }
+
+    const originLabel = resolveAuditEntityLabel(
+      m.source_budget_allocation_id,
+      m.source_goal_id,
+      allocMap,
+      catMap,
+      subcatMap,
+      goalMap
+    );
+
+    const destLabel = resolveAuditEntityLabel(
+      m.dest_budget_allocation_id,
+      m.dest_goal_id,
+      allocMap,
+      catMap,
+      subcatMap,
+      goalMap
+    );
+
+    return {
+      id: Number(m.id),
+      movedAt: Number(m.moved_at) || 0,
+      formattedDateTime: formatDateTime(m.moved_at),
+      type,
+      typeLabel,
+      amount: Number(m.amount) || 0,
+      originLabel,
+      destLabel,
+      note: m.note ? m.note.trim() : null,
+    };
+  });
+}

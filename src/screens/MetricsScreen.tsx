@@ -24,6 +24,10 @@ import {
   ShoppingBag,
   ArrowRightLeft,
   ChevronDown,
+  CreditCard,
+  Brain,
+  History,
+  Sliders,
 } from 'lucide-react';
 import { useFinance } from '../context/FinanceContext';
 import { StandardScreenHeader } from '../components/common/StandardScreenHeader';
@@ -44,6 +48,10 @@ import {
   calculateNetWorthEvolution,
   calculatePlannedVsAllocated,
   calculateGoalsProgressTimeline,
+  calculateBillsProjection,
+  calculateWhatIfSimulation,
+  getAuditMovements,
+  formatFullMonthYear,
   CATEGORY_PALETTE,
 } from '../lib/metricsLogic';
 
@@ -61,6 +69,15 @@ export const MetricsScreen: React.FC = () => {
 
   // Filtro de categoria selecionada (compartilhado entre Seção 3 e Seção 10)
   const [filteredCategoryId, setFilteredCategoryId] = useState<number | null>(null);
+
+  // Seção 13: Simulador What-If
+  const [simGoalId, setSimGoalId] = useState<number | null>(null);
+  const [simCategoryId, setSimCategoryId] = useState<number | null>(null);
+  const [simReductionPercent, setSimReductionPercent] = useState<number>(20);
+
+  // Seção 14: Auditoria de Movimentações
+  const [auditTypeFilter, setAuditTypeFilter] = useState<'TODAS' | 'METAS' | 'ENVELOPES' | 'AJUSTES'>('TODAS');
+  const [auditVisibleCount, setAuditVisibleCount] = useState<number>(20);
 
   const maskValue = (val: string): string => {
     if (hideValues) return '••••••';
@@ -174,6 +191,82 @@ export const MetricsScreen: React.FC = () => {
       6
     );
   }, [data.goals, data.allocation_movements, selectedMonth]);
+
+  // Seção 12: Projeção de Faturas e Contas Fixas (próximos 3 meses)
+  const billsProjection = useMemo(() => {
+    return calculateBillsProjection(data.transactions || [], selectedMonth);
+  }, [data.transactions, selectedMonth]);
+
+  const hasBillsProjection = useMemo(() => {
+    return billsProjection.some((b) => b.total > 0);
+  }, [billsProjection]);
+
+  // Seção 13: Simulador Financeiro "What-If"
+  const activeSimGoalId = useMemo(() => {
+    if (simGoalId != null) return simGoalId;
+    if (data.goals && data.goals.length > 0) return Number(data.goals[0].id);
+    return null;
+  }, [simGoalId, data.goals]);
+
+  const activeSimCategoryId = useMemo(() => {
+    if (simCategoryId != null) return simCategoryId;
+    if (data.categories && data.categories.length > 0) return Number(data.categories[0].id);
+    return null;
+  }, [simCategoryId, data.categories]);
+
+  const whatIfSimulation = useMemo(() => {
+    return calculateWhatIfSimulation(
+      activeSimCategoryId,
+      activeSimGoalId,
+      simReductionPercent,
+      data.transactions || [],
+      data.categories || [],
+      data.goals || [],
+      data.allocation_movements || [],
+      selectedMonth
+    );
+  }, [
+    activeSimCategoryId,
+    activeSimGoalId,
+    simReductionPercent,
+    data.transactions,
+    data.categories,
+    data.goals,
+    data.allocation_movements,
+    selectedMonth,
+  ]);
+
+  // Seção 14: Auditoria Geral de Movimentações
+  const auditMovements = useMemo(() => {
+    return getAuditMovements(
+      data.allocation_movements || [],
+      data.budget_allocations || [],
+      data.categories || [],
+      data.subcategories || [],
+      data.goals || []
+    );
+  }, [
+    data.allocation_movements,
+    data.budget_allocations,
+    data.categories,
+    data.subcategories,
+    data.goals,
+  ]);
+
+  const filteredAuditMovements = useMemo(() => {
+    if (auditTypeFilter === 'METAS') {
+      return auditMovements.filter(
+        (m) => m.type === 'META_APORTE' || m.type === 'META_RETIRADA'
+      );
+    }
+    if (auditTypeFilter === 'ENVELOPES') {
+      return auditMovements.filter((m) => m.type === 'ENVELOPE_TRANSFER');
+    }
+    if (auditTypeFilter === 'AJUSTES') {
+      return auditMovements.filter((m) => m.type === 'PLANNING_ADJUST');
+    }
+    return auditMovements;
+  }, [auditMovements, auditTypeFilter]);
 
   // =========================================================================
   // SKELETON LOADING
@@ -1096,6 +1189,345 @@ export const MetricsScreen: React.FC = () => {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 12. "PROJEÇÃO DE FATURAS E CONTAS FIXAS 💳"                               */}
+      {/* ========================================================================= */}
+      <div
+        id="card-bills-projection"
+        className="rounded-[18px] bg-[#FFFFFF] dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] p-4 shadow-2xs space-y-4 transition-colors"
+      >
+        <div>
+          <h3 className="text-sm font-bold text-[#111827] dark:text-[#F5F7F8]">
+            Projeção de Faturas e Contas Fixas 💳
+          </h3>
+          <p className="text-xs text-[#6B7280] dark:text-[#9FA9AB] mt-0.5">
+            Previsão consolidada para os próximos 3 meses (recorrências e parcelas futuras)
+          </p>
+        </div>
+
+        {!hasBillsProjection ? (
+          <div className="py-10 text-center space-y-2 border border-dashed border-[#E6E9EC] dark:border-[#283438] rounded-2xl">
+            <CreditCard className="w-8 h-8 text-[#6B7280] dark:text-[#9FA9AB] mx-auto opacity-70" />
+            <p className="text-xs font-medium text-[#6B7280] dark:text-[#9FA9AB]">
+              Nenhuma compra parcelada ou despesa fixa recorrente projetada para os próximos 3 meses.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Gráfico de barras empilhadas com cores neutras (âmbar e cinza neutro) */}
+            <div className="h-52 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={billsProjection}
+                  margin={{ top: 10, right: 10, left: -20, bottom: 20 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+                  <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6B7280' }} />
+                  <YAxis
+                    tickCount={4}
+                    tick={{ fontSize: 10, fill: '#6B7280' }}
+                    tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v)}
+                  />
+                  <Tooltip
+                    formatter={(val: any, name: any) => [
+                      maskValue(formatCurrencyBRL(Number(val) || 0)),
+                      name,
+                    ]}
+                  />
+                  <Bar
+                    dataKey="parcelas"
+                    stackId="proj"
+                    fill="#D97706"
+                    name="Compras Parceladas"
+                  />
+                  <Bar
+                    dataKey="recorrentes"
+                    stackId="proj"
+                    fill="#6B7280"
+                    name="Despesas Fixas"
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Legenda de cores */}
+            <div className="flex items-center justify-center gap-4 text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#D97706]" />
+                <span className="text-[#6B7280] dark:text-[#9FA9AB]">Compras Parceladas</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#6B7280]" />
+                <span className="text-[#6B7280] dark:text-[#9FA9AB]">Despesas Fixas</span>
+              </div>
+            </div>
+
+            {/* Lista por mês: detalhamento dos 3 meses */}
+            <div className="space-y-2 pt-2 border-t border-[#E6E9EC] dark:border-[#283438]">
+              {billsProjection.map((item) => (
+                <div
+                  key={item.month}
+                  className="p-2.5 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438] space-y-1.5"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-[#111827] dark:text-[#F5F7F8]">
+                      {item.label}
+                    </span>
+                    <span className="font-extrabold text-[#111827] dark:text-[#F5F7F8]">
+                      Total: {maskValue(formatCurrencyBRL(item.total))}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-[#E6E9EC]/60 dark:border-[#283438]/60">
+                    <div className="text-[#6B7280] dark:text-[#9FA9AB]">
+                      Compras Parceladas (Faturas):{' '}
+                      <span className="font-semibold text-[#D97706] dark:text-[#F59E0B]">
+                        {maskValue(formatCurrencyBRL(item.parcelas))}
+                      </span>
+                    </div>
+                    <div className="text-[#6B7280] dark:text-[#9FA9AB] text-right">
+                      Despesas Fixas Recorrentes:{' '}
+                      <span className="font-semibold text-[#4B5563] dark:text-[#D1D5DB]">
+                        {maskValue(formatCurrencyBRL(item.recorrentes))}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 13. "SIMULADOR FINANCEIRO WHAT-IF 🧠"                                      */}
+      {/* ========================================================================= */}
+      <div
+        id="card-what-if-simulation"
+        className="rounded-[18px] bg-[#FFFFFF] dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] p-4 shadow-2xs space-y-4 transition-colors"
+      >
+        <div>
+          <h3 className="text-sm font-bold text-[#111827] dark:text-[#F5F7F8]">
+            Simulador Financeiro "What-If" 🧠
+          </h3>
+          <p className="text-xs text-[#6B7280] dark:text-[#9FA9AB] mt-0.5">
+            Descubra como pequenas reduções de gasto aceleram suas metas
+          </p>
+        </div>
+
+        {/* 1. Selecione sua Meta Alvo */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-[#6B7280] dark:text-[#9FA9AB]">
+            Selecione sua Meta Alvo:
+          </label>
+          {!data.goals || data.goals.length === 0 ? (
+            <p className="text-xs text-[#6B7280] dark:text-[#9FA9AB] italic">
+              Nenhuma meta cadastrada.
+            </p>
+          ) : (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              {data.goals.map((g) => {
+                const isSelected = activeSimGoalId === Number(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setSimGoalId(Number(g.id))}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] shadow-xs'
+                        : 'bg-[#FAFAFB] dark:bg-[#0D1315] text-[#6B7280] dark:text-[#9FA9AB] border border-[#E6E9EC] dark:border-[#283438] hover:text-[#111827] dark:hover:text-[#F5F7F8]'
+                    }`}
+                  >
+                    {g.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 2. Categoria de Gasto para Economizar */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-[#6B7280] dark:text-[#9FA9AB]">
+            Categoria de Gasto para Economizar:
+          </label>
+          {!data.categories || data.categories.length === 0 ? (
+            <p className="text-xs text-[#6B7280] dark:text-[#9FA9AB] italic">
+              Nenhuma categoria cadastrada.
+            </p>
+          ) : (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              {data.categories.map((c) => {
+                const isSelected = activeSimCategoryId === Number(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setSimCategoryId(Number(c.id))}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] shadow-xs'
+                        : 'bg-[#FAFAFB] dark:bg-[#0D1315] text-[#6B7280] dark:text-[#9FA9AB] border border-[#E6E9EC] dark:border-[#283438] hover:text-[#111827] dark:hover:text-[#F5F7F8]'
+                    }`}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 3. Porcentagem de Redução */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs font-semibold">
+            <span className="text-[#6B7280] dark:text-[#9FA9AB]">Porcentagem de Redução:</span>
+            <span className="text-[#22A45D] dark:text-[#39D47A] font-bold">
+              {simReductionPercent}% de redução
+            </span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={simReductionPercent}
+            onChange={(e) => setSimReductionPercent(Number(e.target.value))}
+            className="w-full accent-[#22A45D] cursor-pointer"
+          />
+        </div>
+
+        {/* Card: Resultado da Simulação */}
+        <div className="p-3.5 rounded-2xl bg-[#F0FDF4] dark:bg-[#0E2018] border border-[#DCFCE7] dark:border-[#1E3A2B] space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#166534] dark:text-[#86EFAC] font-semibold">
+              Resultado da Simulação
+            </span>
+            <span className="text-xs font-extrabold text-[#166534] dark:text-[#86EFAC]">
+              Economia mensal estimada: {maskValue(formatCurrencyBRL(whatIfSimulation.economiaMensal))}
+            </span>
+          </div>
+          <p className="text-xs text-[#14532D] dark:text-[#BBF7D0] leading-relaxed">
+            {whatIfSimulation.resultadoTexto}
+          </p>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 14. "HISTÓRICO GERAL DE MOVIMENTAÇÕES 📜"                                  */}
+      {/* ========================================================================= */}
+      <div
+        id="card-audit-movements"
+        className="rounded-[18px] bg-[#FFFFFF] dark:bg-[#172022] border border-[#E6E9EC] dark:border-[#283438] p-4 shadow-2xs space-y-4 transition-colors"
+      >
+        <div>
+          <h3 className="text-sm font-bold text-[#111827] dark:text-[#F5F7F8]">
+            Histórico Geral de Movimentações 📜
+          </h3>
+          <p className="text-xs text-[#6B7280] dark:text-[#9FA9AB] mt-0.5">
+            Auditoria completa de redistribuições, aportes e retiradas
+          </p>
+        </div>
+
+        {/* Chips de filtro por tipo */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          {(
+            [
+              { key: 'TODAS', label: 'Todas' },
+              { key: 'METAS', label: 'Metas 🎯' },
+              { key: 'ENVELOPES', label: 'Envelopes 🔄' },
+              { key: 'AJUSTES', label: 'Ajustes ⚡' },
+            ] as const
+          ).map((tab) => {
+            const isActive = auditTypeFilter === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setAuditTypeFilter(tab.key)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-[#22A45D] dark:bg-[#39D47A] text-white dark:text-[#0D1214] shadow-xs'
+                    : 'bg-[#FAFAFB] dark:bg-[#0D1315] text-[#6B7280] dark:text-[#9FA9AB] border border-[#E6E9EC] dark:border-[#283438] hover:text-[#111827] dark:hover:text-[#F5F7F8]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Lista de movimentações */}
+        {filteredAuditMovements.length === 0 ? (
+          <div className="py-10 text-center space-y-2 border border-dashed border-[#E6E9EC] dark:border-[#283438] rounded-2xl">
+            <History className="w-8 h-8 text-[#6B7280] dark:text-[#9FA9AB] mx-auto opacity-70" />
+            <p className="text-xs font-medium text-[#6B7280] dark:text-[#9FA9AB]">
+              Nenhuma movimentação registrada no histórico.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="space-y-2 max-h-[460px] overflow-y-auto pr-0.5">
+              {filteredAuditMovements.slice(0, auditVisibleCount).map((item) => (
+                <div
+                  key={item.id}
+                  className="p-3 rounded-xl bg-[#FAFAFB] dark:bg-[#0D1315] border border-[#E6E9EC] dark:border-[#283438] space-y-1.5 text-xs transition-colors"
+                >
+                  {/* Linha 1: data/hora à esquerda e valor à direita */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-[#6B7280] dark:text-[#9FA9AB]">
+                      {item.formattedDateTime}
+                    </span>
+                    <span className="font-bold text-[#22A45D] dark:text-[#39D47A]">
+                      {maskValue(formatCurrencyBRL(item.amount))}
+                    </span>
+                  </div>
+
+                  {/* Linha 2: Tipo de movimentação */}
+                  <div>
+                    <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-semibold bg-black/5 dark:bg-white/10 text-[#111827] dark:text-[#F5F7F8]">
+                      {item.typeLabel}
+                    </span>
+                  </div>
+
+                  {/* Linha 3: De e Para */}
+                  <div className="space-y-0.5 text-[11px]">
+                    <div className="flex items-center gap-1.5 text-[#6B7280] dark:text-[#9FA9AB] truncate">
+                      <span className="w-2 h-2 rounded-full bg-[#EF4444] shrink-0" />
+                      <span className="truncate">De: {item.originLabel}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[#111827] dark:text-[#F5F7F8] font-medium truncate">
+                      <span className="w-2 h-2 rounded-full bg-[#22A45D] shrink-0" />
+                      <span className="truncate">Para: {item.destLabel}</span>
+                    </div>
+                  </div>
+
+                  {/* Linha 4: Nota opcional */}
+                  {item.note && (
+                    <div className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 text-[11px] italic text-[#6B7280] dark:text-[#9FA9AB]">
+                      Nota: {item.note}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Botão Ver Mais se houver mais registros */}
+            {filteredAuditMovements.length > auditVisibleCount && (
+              <button
+                type="button"
+                onClick={() => setAuditVisibleCount((prev) => prev + 20)}
+                className="w-full py-2 rounded-xl text-xs font-semibold text-[#22A45D] dark:text-[#39D47A] hover:bg-[#22A45D]/10 transition-colors cursor-pointer text-center"
+              >
+                Ver mais movimentações (+20)
+              </button>
+            )}
           </div>
         )}
       </div>
