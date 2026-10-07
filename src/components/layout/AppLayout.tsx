@@ -15,15 +15,17 @@ import { useFinance } from '../../context/FinanceContext';
 import { Loader2, ArrowLeft } from 'lucide-react';
 import { isSecurityEnabled } from '../../lib/securityHelper';
 import { PinLockScreen } from '../security/PinLockScreen';
+import { OnboardingFlow } from '../onboarding/OnboardingFlow';
 
 export const AppLayout: React.FC = () => {
-  const { isAuthenticated, loading } = useAuth();
-  const { data, selectedMonth, setSelectedMonth } = useFinance();
+  const { isAuthenticated, loading: authLoading, user } = useAuth();
+  const { data, loading: financeLoading, selectedMonth, setSelectedMonth } = useFinance();
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isPinUnlocked, setIsPinUnlocked] = useState<boolean>(() => {
     return !isSecurityEnabled();
   });
+  const [isOnboardingCompleted, setIsOnboardingCompleted] = useState<boolean>(false);
 
   // Estados para destaque de transação vindo do Planejamento (Fase 5c)
   const [highlightedTransactionId, setHighlightedTransactionId] = useState<string | number | null>(null);
@@ -73,8 +75,8 @@ export const AppLayout: React.FC = () => {
     setActiveTab('planning');
   };
 
-  // 1. Estado de carregamento: enquanto o Firebase verifica a sessão ativa
-  if (loading) {
+  // 1. Estado de carregamento: enquanto o Firebase verifica a sessão ativa ou baixa os dados
+  if (authLoading || (isAuthenticated && financeLoading)) {
     return (
       <div className="min-h-screen bg-[#FAFAFB] dark:bg-[#0D1214] flex flex-col items-center justify-center p-4 transition-colors">
         <div className="flex flex-col items-center gap-3">
@@ -83,7 +85,7 @@ export const AppLayout: React.FC = () => {
           </div>
           <div className="flex items-center gap-2 text-xs font-semibold text-[#6B7280] dark:text-[#A9B1B1]">
             <Loader2 className="w-4 h-4 animate-spin text-[#22A45D] dark:text-[#39D47A]" />
-            <span>Verificando sessão...</span>
+            <span>{authLoading ? 'Verificando sessão...' : 'Carregando dados...'}</span>
           </div>
         </div>
       </div>
@@ -104,6 +106,27 @@ export const AppLayout: React.FC = () => {
   // 2.1 Bloqueio por PIN local quando a segurança estiver ativada
   if (isSecurityEnabled() && !isPinUnlocked) {
     return <PinLockScreen onUnlock={() => setIsPinUnlocked(true)} />;
+  }
+
+  // 2.2 Onboarding enxuto para novos usuários (Fase 9)
+  // Aparece quando: dados carregados, sem contas E sem categorias, e sem a marca no localStorage
+  const isNewUserOnboardingNeeded = (() => {
+    if (!user?.uid) return false;
+    if (financeLoading) return false;
+    const hasAccounts = (data.accounts || []).length > 0;
+    const hasCategories = (data.categories || []).length > 0;
+    if (hasAccounts || hasCategories) return false;
+    const isDone = localStorage.getItem(`mf_onboarding_done_${user.uid}`);
+    return !isDone;
+  })();
+
+  if (!isOnboardingCompleted && isNewUserOnboardingNeeded) {
+    return (
+      <>
+        <OfflineBanner />
+        <OnboardingFlow onComplete={() => setIsOnboardingCompleted(true)} />
+      </>
+    );
   }
 
   // 3. Usuário autenticado: exibir Header, telas internas e BottomNav

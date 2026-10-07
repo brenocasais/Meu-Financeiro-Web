@@ -29,6 +29,7 @@ import {
 } from '../lib/financeLogic';
 import { Account } from '../types/finance';
 import { MonthYearPicker } from '../components/common/MonthYearPicker';
+import { AccountDetailModal } from '../components/home/AccountDetailModal';
 
 interface HomeScreenProps {
   onNavigateTab?: (tab: TabType) => void;
@@ -70,6 +71,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [selectedAccountForDetail, setSelectedAccountForDetail] = useState<Account | null>(null);
 
   // 1. Cabeçalho: Saudação dinâmica por horário
   // "Bom dia" (< 12h), "Boa tarde" (< 18h), "Boa noite" (>= 18h)
@@ -406,7 +408,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {activeAccounts.length === 0 ? (
           <div className="py-6 text-center space-y-2">
             <p className="text-xs text-[#6B7280] dark:text-[#A9B1B1]">
-              Nenhuma conta cadastrada
+              Cadastre sua primeira conta para visualizar seus saldos.
             </p>
             <button
               id="btn-add-account-empty"
@@ -447,7 +449,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               return (
                 <div
                   key={account.id}
-                  onClick={onOpenSettings}
+                  onClick={() => setSelectedAccountForDetail(account)}
                   className="py-3 flex items-center justify-between cursor-pointer group hover:bg-black/[0.02] dark:hover:bg-white/[0.02] -mx-2 px-2 rounded-xl transition-colors"
                 >
                   <div className="flex items-center gap-3">
@@ -632,6 +634,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Detalhe da Conta (Fase 9) */}
+      <AccountDetailModal
+        isOpen={!!selectedAccountForDetail}
+        onClose={() => setSelectedAccountForDetail(null)}
+        account={selectedAccountForDetail}
+      />
     </div>
   );
 };

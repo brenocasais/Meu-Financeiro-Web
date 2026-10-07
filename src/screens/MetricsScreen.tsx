@@ -1242,7 +1242,7 @@ export const MetricsScreen: React.FC = () => {
                     dataKey="parcelas"
                     stackId="proj"
                     fill="#D97706"
-                    name="Compras Parceladas"
+                    name="Parcelas de Cartão"
                   />
                   <Bar
                     dataKey="recorrentes"
@@ -1259,7 +1259,7 @@ export const MetricsScreen: React.FC = () => {
             <div className="flex items-center justify-center gap-4 text-xs">
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#D97706]" />
-                <span className="text-[#6B7280] dark:text-[#9FA9AB]">Compras Parceladas</span>
+                <span className="text-[#6B7280] dark:text-[#9FA9AB]">Parcelas de Cartão</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#6B7280]" />
@@ -1285,7 +1285,7 @@ export const MetricsScreen: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-[#E6E9EC]/60 dark:border-[#283438]/60">
                     <div className="text-[#6B7280] dark:text-[#9FA9AB]">
-                      Compras Parceladas (Faturas):{' '}
+                      Parcelas de Cartão:{' '}
                       <span className="font-semibold text-[#D97706] dark:text-[#F59E0B]">
                         {maskValue(formatCurrencyBRL(item.parcelas))}
                       </span>
