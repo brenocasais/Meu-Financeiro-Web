@@ -77,7 +77,7 @@ export const MetricsScreen: React.FC = () => {
 
   // Seção 14: Auditoria de Movimentações
   const [auditTypeFilter, setAuditTypeFilter] = useState<'TODAS' | 'METAS' | 'ENVELOPES' | 'AJUSTES'>('TODAS');
-  const [auditVisibleCount, setAuditVisibleCount] = useState<number>(20);
+  const [auditVisibleCount, setAuditVisibleCount] = useState<number>(50);
 
   const maskValue = (val: string): string => {
     if (hideValues) return '••••••';
@@ -1416,6 +1416,11 @@ export const MetricsScreen: React.FC = () => {
           <p className="text-xs text-[#14532D] dark:text-[#BBF7D0] leading-relaxed">
             {whatIfSimulation.resultadoTexto}
           </p>
+          {whatIfSimulation.status === 'SIMULATION_ACTIVE' && (
+            <p className="text-xs font-semibold text-[#166534] dark:text-[#86EFAC]">
+              Isso representa {whatIfSimulation.impactoPercentStr} a mais no seu saldo atual da meta
+            </p>
+          )}
         </div>
       </div>
 
@@ -1496,36 +1501,33 @@ export const MetricsScreen: React.FC = () => {
                     </span>
                   </div>
 
-                  {/* Linha 3: De e Para */}
-                  <div className="space-y-0.5 text-[11px]">
-                    <div className="flex items-center gap-1.5 text-[#6B7280] dark:text-[#9FA9AB] truncate">
-                      <span className="w-2 h-2 rounded-full bg-[#EF4444] shrink-0" />
-                      <span className="truncate">De: {item.originLabel}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[#111827] dark:text-[#F5F7F8] font-medium truncate">
-                      <span className="w-2 h-2 rounded-full bg-[#22A45D] shrink-0" />
-                      <span className="truncate">Para: {item.destLabel}</span>
-                    </div>
+                  {/* Linha 3: Origem ➔ Destino em linha única */}
+                  <div className="text-[11px] text-[#111827] dark:text-[#F5F7F8] truncate">
+                    <span className="text-[#6B7280] dark:text-[#9FA9AB]">Origem: </span>
+                    <span className="font-medium">{item.originLabel}</span>
+                    <span className="mx-1 text-[#6B7280] dark:text-[#9FA9AB]">➔</span>
+                    <span className="text-[#6B7280] dark:text-[#9FA9AB]">Destino: </span>
+                    <span className="font-medium">{item.destLabel}</span>
                   </div>
 
-                  {/* Linha 4: Nota opcional */}
+                  {/* Linha 4: Obs opcional */}
                   {item.note && (
                     <div className="p-1.5 rounded-lg bg-black/5 dark:bg-white/5 text-[11px] italic text-[#6B7280] dark:text-[#9FA9AB]">
-                      Nota: {item.note}
+                      Obs: {item.note}
                     </div>
                   )}
                 </div>
               ))}
             </div>
 
-            {/* Botão Ver Mais se houver mais registros */}
+            {/* Botão Mostrar mais se houver mais registros */}
             {filteredAuditMovements.length > auditVisibleCount && (
               <button
                 type="button"
-                onClick={() => setAuditVisibleCount((prev) => prev + 20)}
+                onClick={() => setAuditVisibleCount((prev) => prev + 50)}
                 className="w-full py-2 rounded-xl text-xs font-semibold text-[#22A45D] dark:text-[#39D47A] hover:bg-[#22A45D]/10 transition-colors cursor-pointer text-center"
               >
-                Ver mais movimentações (+20)
+                Mostrar mais
               </button>
             )}
           </div>

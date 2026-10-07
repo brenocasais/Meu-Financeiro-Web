@@ -942,7 +942,7 @@ export function calculateWhatIfSimulation(
       novoFaltante: 0,
       mesesParaAtingir: 0,
       dataEstimada: '',
-      resultadoTexto: `Sua meta '${goalName}' já atingiu o valor alvo!`,
+      resultadoTexto: `Sua meta '${goalName}' já foi alcançada! 🎉`,
       impactoPercentStr: '+0,0%',
       status: 'GOAL_REACHED',
       goalName,
