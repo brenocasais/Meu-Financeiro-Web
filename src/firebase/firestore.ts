@@ -57,6 +57,54 @@ export function sanitizeForFirestore<T>(data: T): T {
 }
 
 /**
+ * Garante que o documento /users/{userId} existe no Firestore.
+ * Se for um usuário novo, inicializa com todos os 9 arrays vazios usando setDoc merge.
+ */
+export async function ensureUserDoc(userId: string): Promise<void> {
+  if (!userId) return;
+  const docRef = getUserDocRef(userId);
+  try {
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      await setDoc(
+        docRef,
+        {
+          accounts: [],
+          categories: [],
+          subcategories: [],
+          transactions: [],
+          budget_allocations: [],
+          allocation_movements: [],
+          goals: [],
+          installment_plans: [],
+          recurrence_rules: [],
+        },
+        { merge: true }
+      );
+    }
+  } catch (err) {
+    console.warn('[Firestore] Falha ao verificar/inicializar documento do usuário:', err);
+  }
+}
+
+/**
+ * Atualiza campos no documento /users/{userId} com fallback resiliente para setDoc merge
+ * caso o documento ainda não exista previamente no Firestore.
+ */
+export async function updateUserDocSafe(
+  userId: string,
+  dataToUpdate: Record<string, any>
+): Promise<void> {
+  const docRef = getUserDocRef(userId);
+  const sanitized = sanitizeForFirestore(dataToUpdate);
+  try {
+    await updateDoc(docRef, sanitized);
+  } catch (err: any) {
+    await setDoc(docRef, sanitized, { merge: true });
+  }
+}
+
+/**
  * Normaliza os dados brutos do Firestore garantindo que todos os arrays existam
  * e que os IDs sejam estritamente numéricos para total interoperabilidade com o Android.
  */

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { Category, Subcategory } from '../../types/finance';
@@ -110,10 +109,9 @@ export const CategoryFormModal: React.FC<CategoryFormModalProps> = ({
         }
       }
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, {
-        categories: sanitizeForFirestore(updatedCategories),
-        subcategories: sanitizeForFirestore(updatedSubcategories),
+      await updateUserDocSafe(user.uid, {
+        categories: updatedCategories,
+        subcategories: updatedSubcategories,
       });
 
       onSuccess(isEditing ? 'Categoria atualizada!' : 'Categoria criada com sucesso!');

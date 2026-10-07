@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { X, ChevronDown, ChevronRight, Check, Sparkles, Loader2 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { CATEGORY_TEMPLATES, TemplateCategory, TemplateSubcategory } from '../../lib/categoryTemplates';
@@ -233,10 +232,9 @@ export const SuggestedCategoriesModal: React.FC<SuggestedCategoriesModalProps> =
       }
 
       // Gravação atômica em /users/{uid}
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, {
-        categories: sanitizeForFirestore(currentCategories),
-        subcategories: sanitizeForFirestore(currentSubcategories),
+      await updateUserDocSafe(user.uid, {
+        categories: currentCategories,
+        subcategories: currentSubcategories,
       });
 
       onSuccessToast(`${totalSubcategoriesCount} subcategorias adicionadas!`);

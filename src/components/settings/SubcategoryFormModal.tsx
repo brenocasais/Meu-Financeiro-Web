@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { Subcategory, Category } from '../../types/finance';
@@ -117,9 +116,8 @@ export const SubcategoryFormModal: React.FC<SubcategoryFormModalProps> = ({
         updatedSubcategories = [...currentSubcategories, newSub];
       }
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, {
-        subcategories: sanitizeForFirestore(updatedSubcategories),
+      await updateUserDocSafe(user.uid, {
+        subcategories: updatedSubcategories,
       });
 
       onSuccess(isEditing ? 'Subcategoria atualizada!' : 'Subcategoria criada com sucesso!');

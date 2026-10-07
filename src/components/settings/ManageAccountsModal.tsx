@@ -9,8 +9,7 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { Account, AccountType } from '../../types/finance';
@@ -73,8 +72,7 @@ export const ManageAccountsModal: React.FC<ManageAccountsModalProps> = ({
         Number(a.id) === Number(account.id) ? { ...a, archived: nextArchived } : a
       );
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, { accounts: sanitizeForFirestore(updated) });
+      await updateUserDocSafe(user.uid, { accounts: updated });
 
       onSuccessToast(nextArchived ? 'Conta arquivada!' : 'Conta desarquivada!');
     } catch (err: any) {
@@ -119,8 +117,7 @@ export const ManageAccountsModal: React.FC<ManageAccountsModalProps> = ({
 
     try {
       const updated = accounts.filter((a) => Number(a.id) !== Number(deleteTarget.id));
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, { accounts: sanitizeForFirestore(updated) });
+      await updateUserDocSafe(user.uid, { accounts: updated });
 
       onSuccessToast('Conta excluída com sucesso!');
       setDeleteTarget(null);

@@ -4,6 +4,7 @@ import {
   subscribeUserData,
   waitForPendingFirestoreWrites,
   pullUserDataFromServer,
+  ensureUserDoc,
 } from '../firebase/firestore';
 import {
   UserFirestoreData,
@@ -195,6 +196,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setLoading(true);
     setSyncStatus('Sincronizando...');
     addSyncLog('Iniciando conexão em tempo real com o Firestore...');
+
+    // Garante que o documento existe no Firestore mesmo para novas contas
+    ensureUserDoc(user.uid);
 
     const unsubscribe = subscribeUserData(
       user.uid,

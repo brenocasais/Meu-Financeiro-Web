@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, Pencil, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { RecurrenceRule } from '../../types/finance';
@@ -57,9 +56,8 @@ export const RecurringTransactionsModal: React.FC<RecurringTransactionsModalProp
         Number(r.id) === Number(deactivateTarget.id) ? { ...r, active: false } : r
       );
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, {
-        recurrence_rules: sanitizeForFirestore(updated),
+      await updateUserDocSafe(user.uid, {
+        recurrence_rules: updated,
       });
 
       onSuccessToast('Recorrência desativada!');

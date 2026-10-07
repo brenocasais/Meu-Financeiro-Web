@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { RecurrenceRule } from '../../types/finance';
@@ -83,9 +82,8 @@ export const EditRecurringRuleModal: React.FC<EditRecurringRuleModalProps> = ({
           : r
       );
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, {
-        recurrence_rules: sanitizeForFirestore(updatedRules),
+      await updateUserDocSafe(user.uid, {
+        recurrence_rules: updatedRules,
       });
 
       onSuccess('Regra recorrente atualizada!');

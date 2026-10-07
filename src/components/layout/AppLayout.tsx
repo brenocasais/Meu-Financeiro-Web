@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Header } from './Header';
 import { BottomNav, TabType } from './BottomNav';
 import { OfflineBanner } from '../pwa/OfflineBanner';
@@ -26,11 +26,39 @@ export const AppLayout: React.FC = () => {
     return !isSecurityEnabled();
   });
   const [isOnboardingCompleted, setIsOnboardingCompleted] = useState<boolean>(false);
+  const [onboardingActive, setOnboardingActive] = useState<boolean>(false);
 
   // Estados para destaque de transação vindo do Planejamento (Fase 5c)
   const [highlightedTransactionId, setHighlightedTransactionId] = useState<string | number | null>(null);
   const [previousTab, setPreviousTab] = useState<TabType | null>(null);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sempre que entrar ou trocar de conta, garante início na tela 'home' e não em configurações, e reseta estados
+  useEffect(() => {
+    setIsSettingsOpen(false);
+    setActiveTab('home');
+    setIsOnboardingCompleted(false);
+    setOnboardingActive(false);
+  }, [user?.uid]);
+
+  // 2.2 Onboarding enxuto para novos usuários (Fase 9)
+  // Aparece quando: dados carregados, sem contas E sem categorias, e sem a marca no localStorage
+  const isNewUserOnboardingNeeded = Boolean(
+    isAuthenticated &&
+    user?.uid &&
+    !financeLoading &&
+    (data.accounts || []).length === 0 &&
+    (data.categories || []).length === 0 &&
+    !localStorage.getItem(`mf_onboarding_done_${user.uid}`)
+  );
+
+  useEffect(() => {
+    if (isNewUserOnboardingNeeded && !isOnboardingCompleted) {
+      setOnboardingActive(true);
+    }
+  }, [isNewUserOnboardingNeeded, isOnboardingCompleted]);
+
+  const shouldShowOnboarding = (onboardingActive || isNewUserOnboardingNeeded) && !isOnboardingCompleted;
 
   const handleSelectTab = (tab: TabType) => {
     setActiveTab(tab);
@@ -109,22 +137,19 @@ export const AppLayout: React.FC = () => {
   }
 
   // 2.2 Onboarding enxuto para novos usuários (Fase 9)
-  // Aparece quando: dados carregados, sem contas E sem categorias, e sem a marca no localStorage
-  const isNewUserOnboardingNeeded = (() => {
-    if (!user?.uid) return false;
-    if (financeLoading) return false;
-    const hasAccounts = (data.accounts || []).length > 0;
-    const hasCategories = (data.categories || []).length > 0;
-    if (hasAccounts || hasCategories) return false;
-    const isDone = localStorage.getItem(`mf_onboarding_done_${user.uid}`);
-    return !isDone;
-  })();
-
-  if (!isOnboardingCompleted && isNewUserOnboardingNeeded) {
+  if (shouldShowOnboarding) {
     return (
       <>
         <OfflineBanner />
-        <OnboardingFlow onComplete={() => setIsOnboardingCompleted(true)} />
+        <OnboardingFlow
+          onComplete={() => {
+            if (user?.uid) {
+              localStorage.setItem(`mf_onboarding_done_${user.uid}`, '1');
+            }
+            setIsOnboardingCompleted(true);
+            setOnboardingActive(false);
+          }}
+        />
       </>
     );
   }

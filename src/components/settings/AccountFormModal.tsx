@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { Account, AccountType } from '../../types/finance';
@@ -81,9 +80,8 @@ export const AccountFormModal: React.FC<AccountFormModalProps> = ({
         updatedAccounts = [...currentAccounts, newAccount];
       }
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, {
-        accounts: sanitizeForFirestore(updatedAccounts),
+      await updateUserDocSafe(user.uid, {
+        accounts: updatedAccounts,
       });
 
       onSuccess(isEditing ? 'Conta atualizada!' : 'Conta criada com sucesso!');

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, Loader2, AlertTriangle } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 
 interface ClearAllDataModalProps {
@@ -31,9 +30,8 @@ export const ClearAllDataModal: React.FC<ClearAllDataModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const docRef = getUserDocRef(user.uid);
-      // Numa única updateDoc, grava os 9 arrays como []
-      await updateDoc(docRef, {
+      // Numa única chamada, grava os 9 arrays como []
+      await updateUserDocSafe(user.uid, {
         accounts: [],
         categories: [],
         subcategories: [],

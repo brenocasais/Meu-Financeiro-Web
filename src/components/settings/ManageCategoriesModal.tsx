@@ -9,8 +9,7 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
-import { updateDoc } from 'firebase/firestore';
-import { getUserDocRef, sanitizeForFirestore } from '../../firebase/firestore';
+import { updateUserDocSafe } from '../../firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { Category, Subcategory } from '../../types/finance';
@@ -70,8 +69,7 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
         Number(c.id) === Number(cat.id) ? { ...c, archived: nextArchived } : c
       );
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, { categories: sanitizeForFirestore(updated) });
+      await updateUserDocSafe(user.uid, { categories: updated });
       onSuccessToast(nextArchived ? 'Categoria arquivada!' : 'Categoria desarquivada!');
     } catch (err: any) {
       console.error('[ManageCategoriesModal] Erro ao arquivar categoria:', err);
@@ -103,8 +101,7 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
 
     try {
       const updated = categories.filter((c) => Number(c.id) !== Number(deleteTargetCategory.id));
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, { categories: sanitizeForFirestore(updated) });
+      await updateUserDocSafe(user.uid, { categories: updated });
 
       onSuccessToast('Categoria excluída!');
       setDeleteTargetCategory(null);
@@ -128,8 +125,7 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
         Number(s.id) === Number(sub.id) ? { ...s, archived: nextArchived } : s
       );
 
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, { subcategories: sanitizeForFirestore(updated) });
+      await updateUserDocSafe(user.uid, { subcategories: updated });
       onSuccessToast(nextArchived ? 'Subcategoria arquivada!' : 'Subcategoria desarquivada!');
     } catch (err: any) {
       console.error('[ManageCategoriesModal] Erro ao arquivar subcategoria:', err);
@@ -159,8 +155,7 @@ export const ManageCategoriesModal: React.FC<ManageCategoriesModalProps> = ({
 
     try {
       const updated = subcategories.filter((s) => Number(s.id) !== Number(deleteTargetSubcategory.id));
-      const docRef = getUserDocRef(user.uid);
-      await updateDoc(docRef, { subcategories: sanitizeForFirestore(updated) });
+      await updateUserDocSafe(user.uid, { subcategories: updated });
 
       onSuccessToast('Subcategoria excluída!');
       setDeleteTargetSubcategory(null);
