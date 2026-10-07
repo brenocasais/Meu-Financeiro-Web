@@ -6,10 +6,12 @@
  * são representados estritamente como NÚMEROS INTEIROS (Int de 32 bits no Kotlin).
  */
 
+export type AccountType = "DINHEIRO" | "CONTA_CORRENTE" | "CARTAO_CREDITO";
+
 export interface Account {
   id: number;
   name: string;
-  type: "DINHEIRO" | "CONTA_CORRENTE" | "CARTAO_CREDITO";
+  type: AccountType;
   initial_balance: number;
   archived: boolean;
 }

@@ -13,12 +13,17 @@ import { FormulaValidator } from '../common/FormulaValidator';
 import { useAuth } from '../../context/AuthContext';
 import { useFinance } from '../../context/FinanceContext';
 import { Loader2, ArrowLeft } from 'lucide-react';
+import { isSecurityEnabled } from '../../lib/securityHelper';
+import { PinLockScreen } from '../security/PinLockScreen';
 
 export const AppLayout: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
   const { data, selectedMonth, setSelectedMonth } = useFinance();
   const [activeTab, setActiveTab] = useState<TabType>('home');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isPinUnlocked, setIsPinUnlocked] = useState<boolean>(() => {
+    return !isSecurityEnabled();
+  });
 
   // Estados para destaque de transação vindo do Planejamento (Fase 5c)
   const [highlightedTransactionId, setHighlightedTransactionId] = useState<string | number | null>(null);
@@ -94,6 +99,11 @@ export const AppLayout: React.FC = () => {
         <LoginScreen />
       </>
     );
+  }
+
+  // 2.1 Bloqueio por PIN local quando a segurança estiver ativada
+  if (isSecurityEnabled() && !isPinUnlocked) {
+    return <PinLockScreen onUnlock={() => setIsPinUnlocked(true)} />;
   }
 
   // 3. Usuário autenticado: exibir Header, telas internas e BottomNav

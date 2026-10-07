@@ -1,6 +1,10 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from './AuthContext';
-import { subscribeUserData } from '../firebase/firestore';
+import {
+  subscribeUserData,
+  waitForPendingFirestoreWrites,
+  pullUserDataFromServer,
+} from '../firebase/firestore';
 import {
   UserFirestoreData,
   Account,
@@ -49,6 +53,8 @@ interface MonthSummary {
   budgetRemaining: number;
 }
 
+export type SyncStatus = 'Sincronizando...' | 'Sincronizado' | 'Erro na sincronização' | 'Pronto';
+
 interface FinanceContextType {
   data: UserFirestoreData;
   installmentPlans: InstallmentPlan[];
@@ -64,6 +70,11 @@ interface FinanceContextType {
   // Preferências visuais da Dashboard
   hideValues: boolean;
   toggleHideValues: () => void;
+  // Sincronização e Auditoria (Fase 8)
+  syncStatus: SyncStatus;
+  syncLogs: string[];
+  pushNow: () => Promise<void>;
+  pullNow: () => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -113,6 +124,47 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return localStorage.getItem('mf_hide_values') === 'true';
   });
 
+  // Sincronização e Auditoria (Fase 8)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('Pronto');
+  const [syncLogs, setSyncLogs] = useState<string[]>([]);
+  const hasInitializedRef = useRef(false);
+
+  const addSyncLog = (msg: string) => {
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+    setSyncLogs((prev) => [`${timeStr} — ${msg}`, ...prev].slice(0, 50));
+  };
+
+  const pushNow = async (): Promise<void> => {
+    setSyncStatus('Sincronizando...');
+    addSyncLog('Forçando envio de dados pendentes para o servidor...');
+    try {
+      await waitForPendingFirestoreWrites();
+      setSyncStatus('Sincronizado');
+      addSyncLog('Dados sincronizados com a nuvem (envio confirmado)');
+    } catch (err: any) {
+      console.error('[FinanceContext] Falha no pushNow:', err);
+      setSyncStatus('Erro na sincronização');
+      addSyncLog(`Erro ao enviar dados: ${err?.message || 'Falha de conexão'}`);
+    }
+  };
+
+  const pullNow = async (): Promise<void> => {
+    if (!user) return;
+    setSyncStatus('Sincronizando...');
+    addSyncLog('Baixando dados mais recentes diretamente do servidor...');
+    try {
+      const freshData = await pullUserDataFromServer(user.uid);
+      setData(freshData);
+      setSyncStatus('Sincronizado');
+      addSyncLog('Dados baixados e sincronizados com a nuvem com sucesso');
+    } catch (err: any) {
+      console.error('[FinanceContext] Falha no pullNow:', err);
+      setSyncStatus('Erro na sincronização');
+      addSyncLog(`Erro ao baixar dados: ${err?.message || 'Falha de conexão'}`);
+    }
+  };
+
   const toggleHideValues = () => {
     setHideValues((prev) => {
       const next = !prev;
@@ -135,20 +187,40 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         recurrence_rules: [],
       });
       setLoading(false);
+      setSyncStatus('Pronto');
+      hasInitializedRef.current = false;
       return;
     }
 
     setLoading(true);
+    setSyncStatus('Sincronizando...');
+    addSyncLog('Iniciando conexão em tempo real com o Firestore...');
+
     const unsubscribe = subscribeUserData(
       user.uid,
-      (userData) => {
+      (userData, metadata) => {
         setData(userData);
         setLoading(false);
         setError(null);
+
+        if (!hasInitializedRef.current) {
+          hasInitializedRef.current = true;
+          addSyncLog('Carga inicial de dados concluída da nuvem');
+        }
+
+        if (metadata?.hasPendingWrites) {
+          setSyncStatus('Sincronizando...');
+          addSyncLog('Gravação local pendente (sincronizando com a nuvem...)');
+        } else {
+          setSyncStatus('Sincronizado');
+          addSyncLog('Dados sincronizados com a nuvem');
+        }
       },
       (err) => {
         console.error('[FinanceContext] Erro ao sincronizar dados:', err);
         setError('Não foi possível carregar os dados financeiros.');
+        setSyncStatus('Erro na sincronização');
+        addSyncLog(`Erro na sincronização: ${err.message || 'Falha de rede'}`);
         setLoading(false);
       }
     );
@@ -341,6 +413,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         alerts,
         hideValues,
         toggleHideValues,
+        syncStatus,
+        syncLogs,
+        pushNow,
+        pullNow,
       }}
     >
       {children}

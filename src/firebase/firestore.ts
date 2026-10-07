@@ -1,4 +1,15 @@
-import { doc, onSnapshot, getDoc, setDoc, updateDoc, arrayUnion, DocumentReference, Unsubscribe } from 'firebase/firestore';
+import {
+  doc,
+  onSnapshot,
+  getDoc,
+  setDoc,
+  updateDoc,
+  arrayUnion,
+  waitForPendingWrites,
+  getDocFromServer,
+  DocumentReference,
+  Unsubscribe,
+} from 'firebase/firestore';
 import { db } from './config';
 import { UserFirestoreData, Transaction, Category, Subcategory, InstallmentPlan, RecurrenceRule, BudgetAllocation, AllocationMovement, Goal } from '../types/finance';
 import { generateNumericId, MoveMoneyParams, executeMoveMoneyLogic, collectAllExistingNumericIds } from '../lib/financeLogic';
@@ -166,24 +177,34 @@ export function normalizeUserData(raw: any): UserFirestoreData {
   };
 }
 
+export interface SyncSnapshotMetadata {
+  hasPendingWrites: boolean;
+  fromCache: boolean;
+}
+
 /**
  * Escuta em tempo real as atualizações no documento /users/{userId}.
  */
 export function subscribeUserData(
   userId: string,
-  onUpdate: (data: UserFirestoreData) => void,
+  onUpdate: (data: UserFirestoreData, metadata?: SyncSnapshotMetadata) => void,
   onError?: (error: Error) => void
 ): Unsubscribe {
   const docRef = getUserDocRef(userId);
 
   return onSnapshot(
     docRef,
+    { includeMetadataChanges: true },
     (snapshot) => {
+      const metadata: SyncSnapshotMetadata = {
+        hasPendingWrites: snapshot.metadata.hasPendingWrites,
+        fromCache: snapshot.metadata.fromCache,
+      };
       if (snapshot.exists()) {
-        onUpdate(normalizeUserData(snapshot.data()));
+        onUpdate(normalizeUserData(snapshot.data()), metadata);
       } else {
         // Documento novo ou vazio
-        onUpdate(normalizeUserData({}));
+        onUpdate(normalizeUserData({}), metadata);
       }
     },
     (error) => {
@@ -191,6 +212,25 @@ export function subscribeUserData(
       if (onError) onError(error);
     }
   );
+}
+
+/**
+ * Força leitura do documento diretamente do servidor Firestore
+ */
+export async function pullUserDataFromServer(userId: string): Promise<UserFirestoreData> {
+  const docRef = getUserDocRef(userId);
+  const snapshot = await getDocFromServer(docRef);
+  if (snapshot.exists()) {
+    return normalizeUserData(snapshot.data());
+  }
+  return normalizeUserData({});
+}
+
+/**
+ * Aguarda confirmação de todas as escritas pendentes no Firestore
+ */
+export async function waitForPendingFirestoreWrites(): Promise<void> {
+  await waitForPendingWrites(db);
 }
 
 /**

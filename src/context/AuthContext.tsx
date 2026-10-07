@@ -6,6 +6,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut as fbSignOut,
+  updateProfile,
   AuthError,
 } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase/config';
@@ -18,6 +19,8 @@ interface AuthContextType {
   registerWithEmail: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  updateUserProfile: (displayName: string) => Promise<void>;
+  refreshUser: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -109,6 +112,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updateUserProfile = async (displayName: string): Promise<void> => {
+    if (!auth.currentUser) return;
+    await updateProfile(auth.currentUser, { displayName });
+    // Atualiza o estado local para refletir imediatamente na UI
+    setUser(auth.currentUser ? ({ ...auth.currentUser } as User) : null);
+  };
+
+  const refreshUser = (): void => {
+    setUser(auth.currentUser ? ({ ...auth.currentUser } as User) : null);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -119,6 +133,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         registerWithEmail,
         loginWithGoogle,
         signOut,
+        updateUserProfile,
+        refreshUser,
       }}
     >
       {children}
